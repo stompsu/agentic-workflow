@@ -1,0 +1,51 @@
+name: Deploy to environment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      TAG: ${{ inputs.tag }}
+      RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+      ACR: ${{ vars.ACR_NAME }}
+      BACKEND_APP: ${{ vars.BACKEND_APP }}
+      FRONTEND_APP: ${{ vars.FRONTEND_APP }}
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy backend, then frontend
+        run: |
+          az config set extension.use_dynamic_install=yes_without_prompt
+          SUFFIX="v${TAG}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          az containerapp update -n "$BACKEND_APP" -g "$RG" \
+            --image "$ACR.azurecr.io/support-backend:$TAG" \
+            --revision-suffix "$SUFFIX"
+          az containerapp update -n "$FRONTEND_APP" -g "$RG" \
+            --image "$ACR.azurecr.io/support-frontend:$TAG" \
+            --revision-suffix "$SUFFIX"
+
+      - name: Smoke test (through the frontend proxy)
+        run: |
+          FQDN=$(az containerapp show -n "$FRONTEND_APP" -g "$RG" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          for i in $(seq 1 12); do
+            if curl -fsS "https://$FQDN/api/healthz" > /dev/null; then
+              echo "Healthy"; exit 0
+            fi
+            sleep 10
+          done
+          echo "Smoke test failed"; exit 1
