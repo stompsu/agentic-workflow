@@ -1,0 +1,24 @@
+id: 1
+event: session
+data: {"sessionId":"{SESSION_ID}"}
+
+id: 2
+event: agent
+data: {"name":"Claims specialist"}
+
+id: 3
+event: token
+data: {"text":"Most claims are settled "}
+
+id: 4
+event: token
+data: {"text":"within 10 working days [S1]."}
+
+id: 5
+event: citation
+data: {"ref":"S1","title":"Claims handling times","docId":"claims-handling-0003","url":"https://kb.example.com/claims/handling"}
+
+id: 6
+event: done
+data: {"messageId":"{MESSAGE_ID}"}
+

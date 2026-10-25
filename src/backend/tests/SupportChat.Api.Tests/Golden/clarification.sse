@@ -1,0 +1,20 @@
+id: 1
+event: session
+data: {"sessionId":"{SESSION_ID}"}
+
+id: 2
+event: agent
+data: {"name":"Support assistant"}
+
+id: 3
+event: token
+data: {"text":"Is your question about policy coverage,\nan existing claim, or a health assessment? Zażółć <b>"}
+
+id: 4
+event: citation
+data: {"ref":"S1","title":"Raw <title> & more","docId":"d1","url":null}
+
+id: 5
+event: done
+data: {"messageId":"{MESSAGE_ID}"}
+

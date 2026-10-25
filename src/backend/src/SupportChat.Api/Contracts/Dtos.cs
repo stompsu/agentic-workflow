@@ -37,3 +37,5 @@ public sealed record SessionDetailDto(
 
 // Request DTOs
 public sealed record CreateSessionRequest(string? WorkflowId, string? Title);
+
+public sealed record SendMessageRequest(string? Content);

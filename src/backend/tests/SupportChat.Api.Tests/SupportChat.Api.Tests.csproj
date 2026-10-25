@@ -14,6 +14,9 @@
     <ProjectReference Include="../../src/SupportChat.Api/SupportChat.Api.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <None Update="Golden\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 </Project>

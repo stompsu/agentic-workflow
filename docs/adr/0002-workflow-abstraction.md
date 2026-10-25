@@ -129,8 +129,8 @@ public interface IChatClientFactory
 - Agents are built in code: `new ChatClientAgent(chatClient, new ChatClientAgentOptions { Name, ChatOptions = new() { Instructions, Tools, Temperature } })`.
   No server-side Foundry agents, no Foundry workflows.
 - Agents are run with explicit history (`RunStreamingAsync(messages, ...)` with a fresh session per turn). No
-  service-side conversation chaining; disable Responses storage (`store=false`) if the installed package exposes it
-  (verify in Phase 2; D3).
+  service-side conversation chaining; Responses storage is disabled (`store=false`) in `ChatClientFactory` for every
+  client it creates (decided, D3).
 - Per-agent deployment from config: `Workflows:SupportTicket:Agents:<AgentKey>:Deployment`. Orchestrator may use a
   cheaper model than the specialists.
 

@@ -1,5 +1,5 @@
 // OpenAI Responses APIs are marked experimental (OPENAI001) in the pinned prerelease; this file is the single consumer (ADR 0002 section 4).
-#pragma warning disable OPENAI001
+#pragma warning disable OPENAI001, MAAI001
 using System.Collections.Concurrent;
 using Azure.AI.Extensions.OpenAI;
 using Azure.AI.Projects;
@@ -53,6 +53,9 @@ public sealed class ChatClientFactory : IChatClientFactory
         ArgumentException.ThrowIfNullOrWhiteSpace(deploymentName);
         return _clients.GetOrAdd(
             deploymentName,
-            name => _projectClient.Value.GetProjectOpenAIClient().GetProjectResponsesClient().AsIChatClient(name));
+            name => _projectClient.Value.GetProjectOpenAIClient().GetProjectResponsesClient()
+                // D3: store=false on every request. includeReasoningEncryptedContent=true asks the service to return
+                // encrypted reasoning items so multi-turn reasoning works statelessly (nothing is kept server-side).
+                .AsIChatClientWithStoredOutputDisabled(name, includeReasoningEncryptedContent: true));
     }
 }

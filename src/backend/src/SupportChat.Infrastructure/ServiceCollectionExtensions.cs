@@ -5,12 +5,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using SupportChat.Core.Health;
+using SupportChat.Core.Knowledge;
 using SupportChat.Core.Models;
 using SupportChat.Core.Options;
 using SupportChat.Core.Storage;
 using SupportChat.Infrastructure.Azure;
 using SupportChat.Infrastructure.Health;
 using SupportChat.Infrastructure.Models;
+using SupportChat.Infrastructure.Search;
 using SupportChat.Infrastructure.Storage.Cosmos;
 
 namespace SupportChat.Infrastructure;
@@ -44,6 +46,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMessageStore, CosmosMessageStore>();
         services.AddSingleton<IReadinessCheck, CosmosReadinessCheck>();
 
+        services.AddSingleton<IKnowledgeSearch, AzureSearchKnowledgeSearch>();
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
         return services;
     }

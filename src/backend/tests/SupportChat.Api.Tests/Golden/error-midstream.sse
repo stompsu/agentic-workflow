@@ -1,0 +1,16 @@
+id: 1
+event: session
+data: {"sessionId":"{SESSION_ID}"}
+
+id: 2
+event: agent
+data: {"name":"Policy specialist"}
+
+id: 3
+event: token
+data: {"text":"Your policy covers "}
+
+id: 4
+event: error
+data: {"code":"upstream_throttled","message":"The service is busy. Please try again in a moment."}
+

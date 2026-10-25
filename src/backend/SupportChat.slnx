@@ -4,9 +4,12 @@
     <Project Path="src/SupportChat.Api/SupportChat.Api.csproj" />
     <Project Path="src/SupportChat.Core/SupportChat.Core.csproj" />
     <Project Path="src/SupportChat.Infrastructure/SupportChat.Infrastructure.csproj" />
+    <Project Path="src/SupportChat.Ingestion/SupportChat.Ingestion.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/SupportChat.Agents.Tests/SupportChat.Agents.Tests.csproj" />
     <Project Path="tests/SupportChat.Api.Tests/SupportChat.Api.Tests.csproj" />
     <Project Path="tests/SupportChat.Infrastructure.Tests/SupportChat.Infrastructure.Tests.csproj" />
+    <Project Path="tests/SupportChat.Ingestion.Tests/SupportChat.Ingestion.Tests.csproj" />
   </Folder>
 </Solution>

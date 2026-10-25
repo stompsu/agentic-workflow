@@ -1,3 +1,4 @@
+using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Options;
 using SupportChat.Core.Options;
@@ -7,7 +8,7 @@ namespace SupportChat.Infrastructure.Tests.Azure;
 
 public class AzureClientFactoryTests
 {
-    private static AzureClientFactory Create(string mode, ThrowingCredential credential, string? cosmosKey = "dGVzdC1rZXk=", string? searchKey = "query-key") =>
+    private static AzureClientFactory Create(string mode, TokenCredential credential, string? cosmosKey = "dGVzdC1rZXk=", string? searchKey = "query-key") =>
         new(
             Options.Create(new AzureOptions { AuthMode = mode }),
             Options.Create(new CosmosOptions { Endpoint = "https://acct.documents.azure.com:443/", Key = cosmosKey }),
@@ -34,15 +35,18 @@ public class AzureClientFactoryTests
     [Fact]
     public void ManagedIdentity_mode_builds_both_clients_with_the_token_credential_and_no_keys()
     {
-        var credential = new ThrowingCredential();
+        // CosmosClient acquires tokens in the background after construction, so "no token requests" cannot be
+        // asserted deterministically. Use a credential that hands out a dummy token and prove the no-key path:
+        // the factory builds both clients from endpoint + credential only (keys are null and would throw in Key mode).
+        var credential = new StaticTokenCredential();
         var factory = Create("ManagedIdentity", credential, cosmosKey: null, searchKey: null);
 
         using var cosmos = factory.CreateCosmosClient();
         var search = factory.CreateSearchClient("support-knowledge");
 
-        Assert.NotNull(cosmos);
-        Assert.NotNull(search);
-        Assert.Equal(0, credential.Calls);
+        Assert.Equal(new Uri("https://acct.documents.azure.com:443/"), cosmos.Endpoint);
+        Assert.Equal("support-knowledge", search.IndexName);
+        Assert.Equal(new Uri("https://svc.search.windows.net"), search.Endpoint);
     }
 
     [Fact]
@@ -96,6 +100,15 @@ public class AzureClientFactoryTests
         Assert.IsType<DefaultAzureCredential>(provider.Credential);
         Assert.Same(provider.Credential, provider.Credential);
     }
+}
+
+internal sealed class StaticTokenCredential : TokenCredential
+{
+    public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+        new("dummy", DateTimeOffset.UtcNow.AddHours(1));
+
+    public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+        new(GetToken(requestContext, cancellationToken));
 }
 
 internal sealed class FakeEnvironment(string name) : Microsoft.Extensions.Hosting.IHostEnvironment

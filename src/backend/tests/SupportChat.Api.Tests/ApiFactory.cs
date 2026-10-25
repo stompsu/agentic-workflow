@@ -11,10 +11,25 @@ using Microsoft.Extensions.Time.Testing;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using SupportChat.Core.Health;
+using SupportChat.Core.Knowledge;
+using SupportChat.Core.Models;
 using SupportChat.Core.Storage;
 using SupportChat.Infrastructure.Storage.InMemory;
 
 namespace SupportChat.Api.Tests;
+
+/// <summary>No model is ever called from Api.Tests.</summary>
+public sealed class FakeChatClientFactory : IChatClientFactory
+{
+    public Microsoft.Extensions.AI.IChatClient Create(string deploymentName) =>
+        throw new InvalidOperationException("Api.Tests must not call a model.");
+}
+
+public sealed class FakeKnowledgeSearch : IKnowledgeSearch
+{
+    public Task<IReadOnlyList<KnowledgeChunk>> SearchAsync(string domain, string query, int top, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<KnowledgeChunk>>([]);
+}
 
 public sealed class FakeReadiness : IReadinessCheck
 {
@@ -103,6 +118,11 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         ["AzureAd:TenantId"] = TestTokens.TenantId,
         ["AzureAd:ClientId"] = TestTokens.Audience,
         ["Auth:RequiredScopes:0"] = "access_as_user",
+        ["Foundry:ProjectEndpoint"] = "https://example.invalid/api/projects/p",
+        ["Workflows:SupportTicket:Agents:Orchestrator:Deployment"] = "test-orchestrator",
+        ["Workflows:SupportTicket:Agents:Policy:Deployment"] = "test-specialist",
+        ["Workflows:SupportTicket:Agents:Claims:Deployment"] = "test-specialist",
+        ["Workflows:SupportTicket:Agents:HealthAssessments:Deployment"] = "test-specialist",
     };
 
     public HttpClient CreateAuthorizedClient(string oid, string scopes = "access_as_user")
@@ -126,6 +146,10 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             services.AddSingleton<IMessageStore>(Store);
             services.RemoveAll<IReadinessCheck>();
             services.AddSingleton<IReadinessCheck>(Readiness);
+            services.RemoveAll<IChatClientFactory>();
+            services.AddSingleton<IChatClientFactory, FakeChatClientFactory>();
+            services.RemoveAll<IKnowledgeSearch>();
+            services.AddSingleton<IKnowledgeSearch, FakeKnowledgeSearch>();
             services.AddLogging(logging => logging.AddProvider(Logs));
 
             services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>

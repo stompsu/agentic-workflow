@@ -61,7 +61,20 @@ public class HealthTests
     }
 }
 
+/// <summary>
+/// Tests whose host is expected to fail during start run alone: WebApplicationFactory resolves the host through
+/// process-wide diagnostic hooks, and a failed start tears the host down (disposing its services) while other
+/// factories are being built in parallel. Serialising these removes that cross-talk (observed once as
+/// "Cannot access a disposed object" instead of the validation message; startup itself is deterministic).
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class StartupFailureCollection
+{
+    public const string Name = "Startup failures";
+}
+
 /// <summary>The real host refuses to start with invalid configuration (ADR 0003 section 4).</summary>
+[Collection(StartupFailureCollection.Name)]
 public class StartupTests
 {
     private static async Task<string> StartFailureAsync(ApiFactory factory)
@@ -71,12 +84,24 @@ public class StartupTests
             var ex = await Record.ExceptionAsync(() => Task.Run(() => factory.CreateClient()));
             Assert.NotNull(ex);
             var messages = new List<string>();
-            for (var e = ex; e is not null; e = e.InnerException)
-            {
-                messages.Add(e.Message);
-            }
+            Collect(ex, messages);
 
             return string.Join(" | ", messages);
+        }
+    }
+
+    private static void Collect(Exception? e, List<string> messages)
+    {
+        for (; e is not null; e = e.InnerException)
+        {
+            messages.Add(e.Message);
+            if (e is AggregateException agg)
+            {
+                foreach (var inner in agg.InnerExceptions)
+                {
+                    Collect(inner, messages);
+                }
+            }
         }
     }
 
@@ -116,9 +141,9 @@ public class StartupTests
     }
 
     [Fact]
-    public async Task A_non_echo_workflow_without_a_Foundry_endpoint_does_not_start()
+    public async Task SupportTicket_is_always_registered_so_a_missing_a_Foundry_endpoint_does_not_start()
     {
-        var message = await StartFailureAsync(new ApiFactory(services: s => s.AddWorkflow<ThrowawayWorkflow>()));
+        var message = await StartFailureAsync(new ApiFactory(configure: c => c.Remove("Foundry:ProjectEndpoint")));
         Assert.Contains("Foundry:ProjectEndpoint", message);
     }
 
@@ -144,10 +169,10 @@ public class StartupTests
     }
 
     [Fact]
-    public async Task Echo_only_registry_starts_without_a_Foundry_endpoint()
+    public async Task Missing_SupportTicket_deployment_does_not_start()
     {
-        using var factory = new ApiFactory(services: s => s.AddWorkflow<FakeEcho>());
-        Assert.Equal(HttpStatusCode.OK, (await factory.CreateClient().GetAsync("/healthz")).StatusCode);
+        var message = await StartFailureAsync(new ApiFactory(configure: c => c["Workflows:SupportTicket:Agents:Claims:Deployment"] = ""));
+        Assert.Contains("Claims:Deployment", message);
     }
 
     private sealed class FakeEcho : SupportChat.Core.Workflows.IWorkflowDefinition

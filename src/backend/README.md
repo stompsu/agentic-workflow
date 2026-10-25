@@ -26,9 +26,17 @@ dotnet user-secrets set "Search:Key"        "<QUERY key, not the admin key>"
 dotnet user-secrets set "AzureAd:Instance"  "https://<tenant-subdomain>.ciamlogin.com/"
 dotnet user-secrets set "AzureAd:TenantId"  "<tenant guid>"
 dotnet user-secrets set "AzureAd:ClientId"  "<API app registration client id>"
-# only once a non-echo workflow is registered (startup validation rule 7):
+# SupportTicket is always registered, so these are required whenever the app runs (startup validation rule 7):
 dotnet user-secrets set "Foundry:ProjectEndpoint" "https://<res>.services.ai.azure.com/api/projects/<project>"
+dotnet user-secrets set "Workflows:SupportTicket:Agents:Orchestrator:Deployment"       "<chat deployment name>"
+dotnet user-secrets set "Workflows:SupportTicket:Agents:Policy:Deployment"             "<chat deployment name>"
+dotnet user-secrets set "Workflows:SupportTicket:Agents:Claims:Deployment"             "<chat deployment name>"
+dotnet user-secrets set "Workflows:SupportTicket:Agents:HealthAssessments:Deployment"  "<chat deployment name>"
+# optional: Workflows:SupportTicket:ConfidenceThreshold (0.7), :MaxConsecutiveClarifications (2),
+#           :Agents:<Key>:Temperature
 ```
+
+Optional chat limits live under `Chat:*` (plan.md section 5). Ingestion keys: see `src/SupportChat.Ingestion`.
 
 Foundry is always accessed with a `TokenCredential` (`az login` locally); there is no model key.
 Deployed environments (`Dev`, `Test`, `Production`) set the same keys as environment variables with `__`

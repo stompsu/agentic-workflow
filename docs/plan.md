@@ -277,6 +277,7 @@ Durations are `TimeSpan` strings (`hh:mm:ss`).
 | `Workflows:Echo:Enabled` | `false` | no | `true` allowed only in Development/Dev/Test (ADR 0003 rule 8) |
 | `Workflows:SupportTicket:ConfidenceThreshold` | `0.7` | no | |
 | `Workflows:SupportTicket:MaxConsecutiveClarifications` | `2` | no | |
+| `Workflows:SupportTicket:MaxToolCallsPerTurn` | `3` | no | 1..10; `search_knowledge` calls per specialist turn. At the cap the model gets one final call with no tool execution; if it still produces no text the turn fails with `workflow_error`. |
 | `Workflows:SupportTicket:Agents:Orchestrator:Deployment` | e.g. `gpt-4.1-mini` | no | names are placeholders (D8) |
 | `Workflows:SupportTicket:Agents:Policy:Deployment` | e.g. `gpt-4.1` | no | |
 | `Workflows:SupportTicket:Agents:Claims:Deployment` | e.g. `gpt-4.1` | no | |
@@ -307,13 +308,14 @@ D2. Plain C# orchestration over `ChatClientAgent`s behind `IWorkflowDefinition` 
 D5. Managed identity for Foundry in all deployed environments; no service-principal secret. `.claude/agents/azure-infra.md`
     updated accordingly. (ADR 0003) The role assignment is conditional on `foundryProjectResourceId` until the
     project exists (D8).
+D3. Responses API storage is disabled (`store=false`) for every model call: history lives only in Cosmos, so nothing
+    is retained in Foundry. Implemented once, in `ChatClientFactory` (ADR 0002 section 4); confirm in the first live
+    smoke test.
 
 Policy consequence recorded (qa finding 1): keys stay allowed in Test per CLAUDE.md, and a pre-prod MI smoke job in
 test gates prod (ADR 0003 section 1a).
 
 ### Open
-D3. Responses API storage: confirm we must not persist conversations server-side in Foundry (`store=false`), and
-    agent-workflows verifies how the installed package exposes it.
 D4. Entra tenants: 2 (nonprod for dev+test, prod) recommended vs 3 (one per stage).
 D6. Offer email one-time passcode sign-in in prod, or social only? (Nonprod: recommended for test users.)
 D7. Data retention per environment (`Chat:RetentionDays`), and whether users need a "delete my data" feature

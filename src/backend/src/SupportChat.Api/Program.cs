@@ -2,9 +2,12 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.ResponseCompression;
 using SupportChat.Agents;
+using Microsoft.Extensions.Options;
 using SupportChat.Api.Auth;
+using SupportChat.Api.Chat;
 using SupportChat.Api.Endpoints;
 using SupportChat.Api.Http;
+using SupportChat.Core.Options;
 using SupportChat.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -26,11 +29,15 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     }
 });
 
-// Workflow registrations go here: services.AddWorkflow<SomeWorkflow>() (ADR 0002). The echo workflow
-// (Workflows:Echo:Enabled, ADR 0002 section 10) is registered by agent-workflows.
-builder.Services.AddAgentWorkflows();
+// Workflow registrations live in AddAgentWorkflows (SupportTicket always; echo only when Workflows:Echo:Enabled).
+// Requires IChatClientFactory + IKnowledgeSearch, registered by AddInfrastructure.
+builder.Services.AddAgentWorkflows(builder.Configuration);
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddChatAuth(builder.Configuration);
+builder.Services.AddChatRateLimiting();
+builder.Services.AddSingleton<IValidateOptions<ChatLimitsOptions>, ChatOptionsValidator>();
+builder.Services.AddOptions<ChatLimitsOptions>().ValidateOnStart();
+builder.Services.AddSingleton<ChatTurnRunner>();
 
 builder.Services.AddResponseCompression(options =>
 {
@@ -49,12 +56,14 @@ app.UseStatusCodePages(context =>
 app.UseResponseCompression();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapHealthEndpoints();
 
 var api = app.MapGroup("/api").RequireAuthorization(AuthExtensions.ChatUserPolicy);
 api.MapWorkflowEndpoints();
 api.MapSessionEndpoints();
+api.MapChatEndpoints();
 
 app.Run();
 

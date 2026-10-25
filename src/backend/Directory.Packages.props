@@ -6,6 +6,8 @@
   <ItemGroup>
     <!-- Foundry prerelease + Azure.AI.Projects pinned EXACTLY (ADR 0002 section 4, decision D1). Upgrades are deliberate PRs. -->
     <PackageVersion Include="Microsoft.Agents.AI.Foundry" Version="[1.26.0-preview.261023.1]" />
+    <!-- Agents project references the core package directly (ChatClientAgent); same version Foundry depends on. -->
+    <PackageVersion Include="Microsoft.Agents.AI" Version="[1.26.0]" />
     <PackageVersion Include="Azure.AI.Projects" Version="[3.0.0-beta.3]" />
     <PackageVersion Include="Azure.AI.Extensions.OpenAI" Version="[3.0.0-beta.3]" />
     <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="[10.10.1]" />

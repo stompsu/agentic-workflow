@@ -15,7 +15,7 @@ public class WorkflowEndpointTests
 
         var list = await client.GetAsync("/api/workflows");
         Assert.Equal(HttpStatusCode.OK, list.StatusCode);
-        var item = Assert.Single((await list.ReadJsonAsync())["items"]!.AsArray())!;
+        var item = (await list.ReadJsonAsync())["items"]!.AsArray().Single(n => n!["id"]!.GetValue<string>() == "throwaway-test")!;
         Assert.Equal("throwaway-test", item["id"]!.GetValue<string>());
         Assert.Equal("Throwaway", item["displayName"]!.GetValue<string>());
         Assert.Equal("A workflow registered only by tests.", item["description"]!.GetValue<string>());
@@ -26,12 +26,13 @@ public class WorkflowEndpointTests
     }
 
     [Fact]
-    public async Task Without_registrations_the_list_is_empty_and_POST_sessions_rejects_any_workflow()
+    public async Task Default_registry_lists_only_SupportTicket_and_POST_sessions_rejects_any_workflow()
     {
         using var factory = new ApiFactory();
         var client = factory.CreateAuthorizedClient(TestTokens.NewOid());
 
-        Assert.Empty((await (await client.GetAsync("/api/workflows")).ReadJsonAsync())["items"]!.AsArray());
+        var ids = (await (await client.GetAsync("/api/workflows")).ReadJsonAsync())["items"]!.AsArray().Select(n => n!["id"]!.GetValue<string>());
+        Assert.Equal(["support-ticket"], ids);
         var response = await client.PostAsync("/api/sessions", Helpers.Json("""{"workflowId":"throwaway-test"}"""));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.ReadJsonAsync();
@@ -51,7 +52,7 @@ public class WorkflowEndpointTests
             });
         var client = factory.CreateAuthorizedClient(TestTokens.NewOid());
         var ids = (await (await client.GetAsync("/api/workflows")).ReadJsonAsync())["items"]!.AsArray().Select(n => n!["id"]!.GetValue<string>());
-        Assert.Equal(["second-one", "throwaway-test"], ids);
+        Assert.Equal(["support-ticket", "second-one", "throwaway-test"], ids);
     }
 
     private sealed class SecondWorkflow : IWorkflowDefinition
