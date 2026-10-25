@@ -13,3 +13,6 @@ You own the agentic layer built on Microsoft Agent Framework.
 - Prompts live in versioned files (not inline strings), one per agent.
 - Expose results as an async stream of typed events (token, agent-changed, citation, done, error).
 Write unit tests with a fake IChatClient; do not call real models in tests.
+- Models come from a single AIAgent factory built on AIProjectClient. Follow the foundry-model-access skill.
+  Do not create server-side Foundry agents or Foundry workflows; define agents in code so they are testable and versioned in git.
+- Model deployment names come from configuration per agent (orchestrator may use a cheaper model than specialists).

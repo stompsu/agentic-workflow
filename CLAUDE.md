@@ -1,22 +1,21 @@
-# Support Ticket Agentic System
-
 ## Architecture
-- Frontend: React + TypeScript (Vite), chat UI with streaming, login, history, workflow dropdown.
+- Frontend: React + TypeScript (Vite). Chat UI with streaming, login, history, workflow dropdown.
+  Served by an nginx container; /api is reverse-proxied to the backend (same origin, no CORS).
 - Backend: .NET 10 Web API hosting Microsoft Agent Framework (MAF) workflows.
-- Knowledge: Azure AI Search. Session/history store: Cosmos DB.
-- Workflow "SupportTicket": orchestrator agent classifies into Policy | Claims | HealthAssessments,
-  then routes to the matching specialist agent.
-- New workflow types must be addable WITHOUT changing the chat endpoints or the chat UI.
+- Models: via Azure.AI.Projects `AIProjectClient` -> IChatClient. Agents are defined in code (ChatClientAgent),
+  NOT as server-side Foundry agents or Foundry workflows (Foundry workflows are being retired).
+- Knowledge: Azure AI Search. Session/history: Cosmos DB.
+- Hosting: Azure Container Apps (frontend app + backend app, one Container Apps environment per stage).
+- Login: social providers (Google, Facebook, ...) through Microsoft Entra External ID. Backend validates JWTs only.
+- Workflow "SupportTicket": orchestrator classifies into Policy | Claims | HealthAssessments, then routes to the specialist.
+- New workflow types must be addable WITHOUT changing chat endpoints or the chat UI.
 
 ## Hard rules
-- Auth to Azure services: access keys in Development/Test, Managed Identity (DefaultAzureCredential) in Production.
-  Selected ONLY via configuration (`Azure:AuthMode` = Key | ManagedIdentity). Never hardcode secrets.
-- MAF's API changes quickly. Before writing MAF code, check current Microsoft Learn docs
-  and the installed package versions. Do not rely on memory.
-- Streaming uses Server-Sent Events. Contract lives in /docs/api-contract.md. Change it there first.
-- Every feature needs tests. Run `dotnet test` and `npm test` before declaring done.
-
-## Conventions
-- Backend: C#, nullable enabled, minimal APIs, options pattern, DI everywhere, no static state.
-- Frontend: strict TypeScript, functional components, React Query for server state.
-- Commits small and scoped. ADRs in /docs/adr for any non-obvious decision.
+- Cosmos + AI Search: access keys in Development/Test, Managed Identity in Production, chosen by config `Azure:AuthMode`
+  (Key | ManagedIdentity). Startup must FAIL if AuthMode=Key in Production.
+- AIProjectClient always uses a TokenCredential (DefaultAzureCredential). No model keys.
+- Never hardcode secrets. Dev/Test secrets come from Key Vault references or user-secrets.
+- MAF and Azure.AI.Projects APIs change quickly: check current Microsoft Learn docs and installed package versions
+  before writing code.
+- SSE over fetch + ReadableStream (needs Authorization header). Contract: /docs/api-contract.md. Change it there first.
+- User identity = `oid` claim from the validated token. Every data access is scoped to it.

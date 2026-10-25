@@ -11,3 +11,4 @@ Responsibilities:
 - Define Cosmos containers, partition keys (userId for sessions) and the AI Search index schema.
 - Split work into tasks for backend-dotnet, agent-workflows, frontend-react, azure-infra, qa-reviewer.
 Output: a short plan with explicit interfaces between components. Never edit src/ files.
+- Decide how identity flows: SPA token -> API (JWT `oid`) -> Cosmos partition key. Document in an ADR.

@@ -1,14 +1,16 @@
 ---
 name: backend-dotnet
-description: .NET 10 Web API: endpoints, auth, SSE streaming, Cosmos/AI Search clients, DI, configuration, credential switching. Use for anything in /src/backend except agent definitions.
+description: .NET 10 Web API: endpoints, JWT validation, SSE streaming, Cosmos/AI Search clients, DI, config, credential switching, Dockerfile. Use for anything in /src/backend except agent definitions.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
 You build the ASP.NET Core (.NET 10) backend.
-- Use minimal APIs, options pattern, typed clients, ProblemDetails for errors.
-- Auth: JWT bearer validation; every endpoint scopes data to the authenticated user.
-- Endpoints (see /docs/api-contract.md): list workflows, create/list/get sessions, post message (SSE stream).
-- Implement ICredentialFactory driven by Azure:AuthMode (Key | ManagedIdentity) for Cosmos and AI Search. Follow the azure-auth-switch skill.
-- Stream tokens via SSE, support cancellation (HttpContext.RequestAborted).
-- Never put agent prompts or routing logic here. That belongs to agent-workflows.
-Always run `dotnet build` and `dotnet test` before reporting back.
+- Minimal APIs, options pattern, typed clients, ProblemDetails.
+- Auth: JWT bearer validation against the Entra External ID tenant (Microsoft.Identity.Web). Follow the external-social-auth skill.
+  Resolve userId from the `oid` claim; reject requests without it.
+- Endpoints per /docs/api-contract.md: GET /workflows, POST/GET /sessions, GET /sessions/{id}, POST /sessions/{id}/messages (SSE).
+- Credentials: follow azure-auth-switch (keys vs Managed Identity for Cosmos/Search; TokenCredential for AIProjectClient).
+- SSE: flush per event, send a comment heartbeat every ~15 s (Container Apps ingress closes idle connections), honor RequestAborted.
+- Multi-stage Dockerfile, non-root user, /healthz and /readyz endpoints, stateless (no in-memory sessions).
+- Agent prompts and routing logic belong to agent-workflows, not here.
+Run `dotnet build` and `dotnet test` before reporting back.
