@@ -1,0 +1,99 @@
+# Infrastructure (Bicep)
+
+One deployment per environment at resource-group scope: `main.bicep` + `params/{dev,test,prod}.bicepparam`.
+Nothing here has been deployed or compiled against Azure by the author; run `az bicep build --file infra/main.bicep`
+and a `what-if` before the first real deploy. No secret values exist in params or outputs.
+
+## Modules (`modules/`)
+
+| Module | Creates |
+|---|---|
+| `monitoring` | Log Analytics workspace, workspace-based Application Insights |
+| `identity` | User-assigned managed identity (the app identity; `AZURE_CLIENT_ID`) |
+| `acr` / `acr-pull` | Shared ACR (dev only); AcrPull for the identity (scope = ACR resource group) |
+| `keyvault` / `keyvault-secrets` | Key Vault (RBAC mode); dev/test: Secrets User for the identity, `cosmos-key` and `search-query-key` secrets |
+| `cosmos` | Account (serverless dev/test, autoscale prod, `disableLocalAuth` in prod), db `supportchat`, container `chat` (`/userId`, indexing policy, `defaultTtl -1`), data-plane role (prod, test) |
+| `search` | AI Search (semantic ranker `standard`, system identity; `aadOrApiKey` dev/test, local auth disabled prod), Search Index Data Reader (prod, test) |
+| `container-env` | Container Apps environment |
+| `containerapp` | Generic app: used for backend (internal ingress, `/healthz` startup+liveness, `/readyz` readiness, HTTP-concurrency scale rule, min replicas 1 in prod) and frontend (external ingress) |
+| `smoke-job` | test only, optional: manual Container Apps Job, `--smoke-check`, `Azure__AuthMode=ManagedIdentity`, no keys (ADR 0003 1a) |
+| `role-foundry-project` | "Azure AI User" on an existing Foundry project, only if `foundryProjectResourceId` is set |
+| `role-model-account` | Search identity -> "Cognitive Services OpenAI User" on the embedding model resource, only if `modelResourceId` is set (Phase 2) |
+
+## Per-environment behaviour
+
+| | dev | test | prod |
+|---|---|---|---|
+| `ASPNETCORE_ENVIRONMENT` / `Azure__AuthMode` | `Dev` / `Key` | `Test` / `Key` | `Production` / `ManagedIdentity` |
+| Cosmos | serverless, keys | serverless, keys + data role for MI | provisioned autoscale, local auth off, data role for MI |
+| Search | `aadOrApiKey` | `aadOrApiKey` + Index Data Reader for MI | local auth off, Index Data Reader for MI |
+| Key Vault secrets | yes (KV references on the apps) | yes | none (no Secrets User, purge protection on) |
+| Min replicas (backend/frontend) | 0 | 0 | 1 |
+
+Foundry: `foundryProjectResourceId` (default empty) -> "Azure AI User" for the identity in every environment once set.
+`foundryProjectEndpoint` sets `Foundry__ProjectEndpoint`. Both stay empty in Phase 1 (echo only, D8).
+
+## Shared ACR
+
+One registry (`acrName`), created by the dev deployment (`createAcr = true`). test and prod set `createAcr = false`,
+`acrName` and `acrResourceGroup` (the dev RG) and only get an AcrPull assignment for their own identity, created by the
+`acr-pull` module at the registry's resource group scope. Apps pull with the managed identity (admin user disabled).
+The registry is not mirrored per stage so the same image (same digest) is promoted. If you do not want the infra
+pipeline to hold role-assignment rights in the ACR resource group, set `assignAcrPull = false` and create the
+assignment manually once.
+
+## Images
+
+`backendImage` / `frontendImage` empty -> a public placeholder image (port 80, no probes) so infra can be deployed
+before the first image exists. Real images listen on `containerPort` (8080, non-root; assumption for the Dockerfiles).
+CAUTION: re-running the infra deployment with empty image params resets the apps to the placeholder. After the first
+real deploy, pass the current images (e.g. `--parameters backendImage=$(az containerapp show ... --query properties.template.containers[0].image -o tsv)`)
+or avoid infra redeploys without them. See open questions in the hand-off report.
+
+## Placeholder guard
+Entra params (`entraInstance`, `entraTenantId`, `apiClientId`, `spaClientId`, `spaAuthority`, `apiScope`) have no defaults in
+`main.bicep`. The committed `params/*.bicepparam` hold `REPLACE_ME` / all-zero GUID placeholders so they compile. Bicep
+`assert` is experimental in 0.48 (BCP349) and is not enabled, so `scripts/check-params.sh` greps the param files and exits 1
+on any placeholder. The infra pipeline (Phase 4) must run it before `what-if` / deploy.
+
+## Deploy order
+
+1. Manual prerequisites: resource group per environment, the GitHub OIDC identities (`docs/cicd-setup.md`), Entra External
+   ID registrations (`docs/auth-setup.md`) -> fill `entra*`, `apiClientId`, `spa*`, `apiScope` in the param files.
+2. Deploy dev first (it creates the shared ACR), then test and prod:
+   `az deployment group create -g <rg> --parameters infra/params/<env>.bicepparam` (run by the user or the infra workflow).
+   First deploy writes `cosmos-key` and `search-query-key` to Key Vault (dev/test) before the apps reference them.
+   If it fails right after the role assignment (Key Vault Secrets User / AcrPull propagation), re-run it.
+3. Search query key: Bicep reads the default query key with `listQueryKeys()` (`writeSearchQueryKeyFromBicep=true`), so
+   no extra step is needed. Fallback only if you set it to `false` or the default key was deleted:
+   `infra/scripts/ensure-search-query-key.sh <rg> <search-name> <key-vault-name>` (run by the user; never prints the key).
+   The names come from the deployment outputs.
+4. App revisions: the deploy workflow (`az containerapp update --image ... --revision-suffix ...`) rolls the real images.
+5. Search index creation / ingestion: Phase 2 (not Bicep).
+6. Test: after the backend image supports `--smoke-check`, set `deploySmokeJob = true` and pass `backendImage`.
+
+## Outputs for pipelines
+
+`resourceGroup`, `acrName`, `acrLoginServer`, `backendAppName`, `frontendAppName`, `frontendFqdn`,
+`managedIdentityClientId`, plus `keyVaultName`, `cosmosAccountName`, `searchServiceName`, `searchPrincipalId`,
+`smokeJobName` (empty unless the test smoke job exists). Map to GitHub environment vars: `AZURE_RESOURCE_GROUP`,
+`ACR_NAME`, `BACKEND_APP`, `FRONTEND_APP` (`MI_SMOKE_JOB` in test). `AZURE_CLIENT_ID` of the pipeline is the
+GitHub OIDC identity, NOT `managedIdentityClientId` (that is the app identity).
+
+## Roles for the pipeline identity (per `github-azure-oidc-setup`; granted by the user)
+
+- Deploy workflows (all environments): `Contributor` on the environment RG (update apps, start the smoke job).
+- Dev identity: `AcrPush` on the shared ACR (build-push).
+- Infra workflow (this folder) additionally needs, on the environment RG: `Role Based Access Control Administrator`
+  (or `User Access Administrator`) to create role assignments (Key Vault, Search, ACR, Cosmos data roles use
+  Cosmos-specific assignments and are covered by Contributor), and `Key Vault Secrets Officer` to write the
+  dev/test secrets (the vault uses RBAC). For test/prod `acr-pull`: role-assignment rights on the ACR scope
+  (or `assignAcrPull = false`). For Foundry/model role assignments: role-assignment rights on that project/account.
+- Contributor alone is NOT enough for `infra.yml`. Deploying infra from a laptop as the user avoids granting the
+  pipeline these roles (suggested for v1; the user decides).
+
+## Manual / out of scope
+
+- Entra External ID tenant, app registrations, Google/Facebook federation, redirect URIs: `docs/auth-setup.md`.
+- Foundry project and model deployments (referenced only).
+- GitHub environments, OIDC identities, variables: `docs/cicd-setup.md`.

@@ -95,13 +95,13 @@ Retention per environment is an open decision (D7 in /docs/plan.md).
   "indexingMode": "consistent",
   "automatic": true,
   "includedPaths": [
-    { "path": "/userId/?" }, { "path": "/type/?" }, { "path": "/sessionId/?" }, { "path": "/state/?" },
+    { "path": "/userId/?" }, { "path": "/id/?" }, { "path": "/type/?" }, { "path": "/sessionId/?" }, { "path": "/state/?" },
     { "path": "/status/?" }, { "path": "/createdAt/?" }, { "path": "/updatedAt/?" }
   ],
   "excludedPaths": [ { "path": "/*" } ],
   "compositeIndexes": [
-    [ { "path": "/type", "order": "ascending" }, { "path": "/state", "order": "ascending" }, { "path": "/updatedAt", "order": "descending" } ],
-    [ { "path": "/type", "order": "ascending" }, { "path": "/sessionId", "order": "ascending" }, { "path": "/createdAt", "order": "descending" } ]
+    [ { "path": "/userId", "order": "ascending" }, { "path": "/type", "order": "ascending" }, { "path": "/state", "order": "ascending" }, { "path": "/updatedAt", "order": "descending" } ],
+    [ { "path": "/userId", "order": "ascending" }, { "path": "/type", "order": "ascending" }, { "path": "/sessionId", "order": "ascending" }, { "path": "/createdAt", "order": "descending" } ]
   ]
 }
 ```
