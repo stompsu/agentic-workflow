@@ -1,0 +1,15 @@
+# Root build context for src/backend/Dockerfile.ingestion (docker build -f src/backend/Dockerfile.ingestion .).
+**/bin/
+**/obj/
+**/node_modules/
+**/.vs/
+**/*.user
+.git/
+.github/
+.claude/
+src/frontend/
+src/backend/tests/
+infra/
+docs/
+**/Dockerfile*
+**/.dockerignore

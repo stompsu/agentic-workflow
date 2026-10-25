@@ -64,12 +64,25 @@ param writeSearchQueryKeyFromBicep bool = true
 @description('test only: create the manual MI smoke job (needs a real backend image).')
 param deploySmokeJob bool = false
 
+// ---- ingestion job -------------------------------------------------------------------------------------------------
+@description('Image of the ingestion console app (shared ACR: support-ingestion). Empty = no job.')
+param ingestionImage string = ''
+@description('Create the dedicated ingestion identity and the manual ingestion Container Apps Job (needs ingestionImage).')
+param deployIngestionJob bool = false
+@description('Embedding model deployment name in the Foundry project (Ingestion__EmbeddingDeployment, Ingestion__VectorizerDeployment).')
+param embeddingDeployment string = 'text-embedding-3-small'
+@description('Resource uri of the model account for the integrated vectorizer. Empty = derived from modelResourceId (https://<account>.openai.azure.com), or unset.')
+param vectorizerResourceUri string = ''
+@description('Source folder inside the ingestion image (Dockerfile.ingestion copies knowledge/ to /app/knowledge).')
+param ingestionSourcePath string = '/app/knowledge'
+
 // ---------------------------------------------------------------------------------------------------------------------
 var isProd = environmentName == 'prod'
 var isTest = environmentName == 'test'
 var useKeys = !isProd                 // Key mode: dev and test (Azure__AuthMode=Key, KV secret references)
 var grantDataRoles = isProd || isTest // data-plane roles for the app identity (test: for the MI smoke job)
 var aspNetEnvironment = environmentName == 'dev' ? 'Dev' : (isTest ? 'Test' : 'Production')
+var ingestionEnabled = deployIngestionJob && !empty(ingestionImage)
 var base = '${namePrefix}-${environmentName}'
 var uniq = take(uniqueString(resourceGroup().id), 5)
 var tags = { app: 'supportchat', environment: environmentName }
@@ -90,6 +103,12 @@ module identity 'modules/identity.bicep' = {
   params: { name: base, location: location, tags: tags }
 }
 
+// Dedicated ingestion identity: only exists when the job is deployed.
+module ingestionIdentity 'modules/identity.bicep' = if (ingestionEnabled) {
+  name: 'identity-ingestion'
+  params: { name: '${base}-ingest', location: location, tags: tags }
+}
+
 module acr 'modules/acr.bicep' = if (createAcr) {
   name: 'acr'
   params: { name: acrName, location: location, tags: tags }
@@ -102,6 +121,13 @@ module acrPull 'modules/acr-pull.bicep' = if (assignAcrPull) {
   dependsOn: [ acr ]
 }
 
+module acrPullIngestion 'modules/acr-pull.bicep' = if (assignAcrPull && ingestionEnabled) {
+  name: 'acr-pull-ingestion'
+  scope: resourceGroup(acrSubscriptionId, acrResourceGroup)
+  params: { acrName: acrName, principalId: ingestionEnabled ? ingestionIdentity.?outputs.principalId ?? '' : '' }
+  dependsOn: [ acr ]
+}
+
 module keyVault 'modules/keyvault.bicep' = {
   name: 'keyvault'
   params: {
@@ -110,6 +136,7 @@ module keyVault 'modules/keyvault.bicep' = {
     tags: tags
     enablePurgeProtection: isProd
     kvReaderPrincipalId: useKeys ? identity.outputs.principalId : ''
+    additionalSecretsUserPrincipalIds: useKeys && ingestionEnabled ? [ ingestionIdentity.?outputs.principalId ?? '' ] : []
   }
 }
 
@@ -135,6 +162,7 @@ module search 'modules/search.bicep' = {
     sku: searchSku
     disableLocalAuth: isProd
     indexReaderPrincipalId: grantDataRoles ? identity.outputs.principalId : ''
+    ingestionPrincipalId: isProd && ingestionEnabled ? ingestionIdentity.?outputs.principalId ?? '' : ''
   }
 }
 
@@ -145,6 +173,7 @@ module secrets 'modules/keyvault-secrets.bicep' = if (useKeys) {
     cosmosAccountName: cosmos.outputs.name
     searchServiceName: search.outputs.name
     writeSearchQueryKey: writeSearchQueryKeyFromBicep
+    writeSearchAdminKey: ingestionEnabled
   }
 }
 
@@ -168,6 +197,26 @@ module modelRole 'modules/role-model-account.bicep' = if (!empty(modelResourceId
   params: {
     accountName: empty(modelResourceId) ? 'unused' : modelParts[8]
     principalId: search.outputs.principalId
+  }
+}
+
+// Ingestion identity -> Foundry project (embeddings via AIProjectClient) and model account.
+module foundryRoleIngestion 'modules/role-foundry-project.bicep' = if (ingestionEnabled && !empty(foundryProjectResourceId)) {
+  name: 'role-foundry-ingestion'
+  scope: resourceGroup(empty(foundryProjectResourceId) ? subscription().subscriptionId : foundryParts[2], empty(foundryProjectResourceId) ? resourceGroup().name : foundryParts[4])
+  params: {
+    accountName: empty(foundryProjectResourceId) ? 'unused' : foundryParts[8]
+    projectName: empty(foundryProjectResourceId) ? 'unused' : foundryParts[10]
+    principalId: ingestionIdentity.?outputs.principalId ?? ''
+  }
+}
+
+module modelRoleIngestion 'modules/role-model-account.bicep' = if (ingestionEnabled && !empty(modelResourceId)) {
+  name: 'role-model-ingestion'
+  scope: resourceGroup(empty(modelResourceId) ? subscription().subscriptionId : modelParts[2], empty(modelResourceId) ? resourceGroup().name : modelParts[4])
+  params: {
+    accountName: empty(modelResourceId) ? 'unused' : modelParts[8]
+    principalId: ingestionIdentity.?outputs.principalId ?? ''
   }
 }
 
@@ -280,6 +329,42 @@ module smokeJob 'modules/smoke-job.bicep' = if (isTest && deploySmokeJob && !bac
   dependsOn: [ acrPull ]
 }
 
+// Ingestion job (dev/test: Key mode with the admin key from Key Vault; prod: Managed Identity, no keys).
+var effectiveVectorizerUri = !empty(vectorizerResourceUri) ? vectorizerResourceUri : (empty(modelResourceId) ? '' : 'https://${modelParts[8]}.openai.azure.com')
+var ingestionEnv = concat([
+  { name: 'ASPNETCORE_ENVIRONMENT', value: aspNetEnvironment }
+  { name: 'DOTNET_ENVIRONMENT', value: aspNetEnvironment }
+  { name: 'AZURE_CLIENT_ID', value: ingestionEnabled ? ingestionIdentity.?outputs.clientId ?? '' : '' }
+  { name: 'AZURE_TOKEN_CREDENTIALS', value: 'ManagedIdentityCredential' }
+  { name: 'Azure__AuthMode', value: useKeys ? 'Key' : 'ManagedIdentity' }
+  { name: 'Search__Endpoint', value: search.outputs.endpoint }
+  { name: 'Search__IndexName', value: searchIndexName }
+  { name: 'Ingestion__SourcePath', value: ingestionSourcePath }
+  { name: 'Ingestion__EmbeddingDeployment', value: embeddingDeployment }
+  { name: 'Ingestion__VectorizerDeployment', value: embeddingDeployment }
+],
+  foundryEnv,
+  empty(effectiveVectorizerUri) ? [] : [ { name: 'Ingestion__VectorizerResourceUri', value: effectiveVectorizerUri } ],
+  useKeys ? [ { name: 'Ingestion__SearchAdminKey', secretRef: 'search-admin-key' } ] : []
+)
+module ingestionJob 'modules/ingestion-job.bicep' = if (ingestionEnabled) {
+  name: 'ingestion-job'
+  params: {
+    name: 'caj-${base}-ingest'
+    location: location
+    tags: union(tags, { role: 'ingestion' })
+    environmentId: containerEnv.outputs.id
+    identityId: ingestionIdentity.?outputs.id ?? ''
+    registryServer: registryServer
+    image: ingestionImage
+    env: ingestionEnv
+    secrets: useKeys ? [
+      { name: 'search-admin-key', keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/search-admin-key', identity: ingestionIdentity.?outputs.id ?? '' }
+    ] : []
+  }
+  dependsOn: [ acrPullIngestion, secrets ]
+}
+
 // ---- outputs (no secrets) ------------------------------------------------------------------------------------------
 output resourceGroup string = resourceGroup().name
 output acrName string = acrName
@@ -293,3 +378,4 @@ output cosmosAccountName string = cosmos.outputs.name
 output searchServiceName string = search.outputs.name
 output searchPrincipalId string = search.outputs.principalId
 output smokeJobName string = smokeJob.?outputs.name ?? ''
+output ingestionJobName string = ingestionJob.?outputs.name ?? ''

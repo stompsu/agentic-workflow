@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  pull_request:
+  # No push trigger: deploy.yml calls this workflow on every push to main.
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet restore src/backend
+      - run: dotnet build src/backend --no-restore -c Release
+      - run: dotnet test src/backend --no-build -c Release --logger trx --results-directory ./test-results
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: backend-test-results
+          path: test-results
+          if-no-files-found: ignore
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: src/frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  # Playwright with mocked auth and mocked API (vite --mode e2e). No real social login in the pipeline.
+  e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: src/frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            src/frontend/playwright-report
+            src/frontend/test-results
+          if-no-files-found: ignore
+
+  infra-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Bicep build (lint)
+        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+      - name: Bicep build-params
+        run: |
+          for f in infra/params/*.bicepparam; do
+            echo "build-params $f"
+            az bicep build-params --file "$f" --stdout > /dev/null
+          done
+      # check-params.sh (placeholder guard) is deliberately NOT run here: committed params hold placeholders.
+      # It runs in infra.yml before what-if / deploy.
+      - name: Shell syntax
+        run: |
+          bash -n infra/scripts/check-params.sh
+          bash -n infra/scripts/ensure-search-query-key.sh
+          bash -n scripts/setup-github-oidc.sh
+          bash -n .github/scripts/wait-job-execution.sh
+
+  docker-validate:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: support-backend
+            context: src/backend
+            file: src/backend/Dockerfile
+          - image: support-frontend
+            context: src/frontend
+            file: src/frontend/Dockerfile
+          - image: support-ingestion
+            context: .
+            file: src/backend/Dockerfile.ingestion
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

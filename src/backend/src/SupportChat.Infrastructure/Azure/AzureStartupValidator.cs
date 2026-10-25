@@ -16,13 +16,17 @@ public static class AzureStartupValidator
 
     private static readonly string[] NonProductionEnvironments = ["Development", "Dev", "Test"];
 
+    /// <summary>True for the allow-listed environments (Development, Dev, Test; case-insensitive) where key auth may run.</summary>
+    public static bool IsKeyAllowedEnvironment(string environmentName) =>
+        NonProductionEnvironments.Any(e => Is(environmentName, e));
+
     public static IReadOnlyList<string> Validate(
         IConfiguration configuration, string environmentName, IEnumerable<WorkflowDescriptor> workflows)
     {
         var failures = new List<string>();
         var isProduction = Is(environmentName, "Production");
         var isDevelopment = Is(environmentName, "Development");
-        var keyAllowedEnvironment = NonProductionEnvironments.Any(e => Is(environmentName, e));
+        var keyAllowedEnvironment = IsKeyAllowedEnvironment(environmentName);
 
         var authModeRaw = configuration["Azure:AuthMode"];
         AzureAuthMode? mode = null;
@@ -110,6 +114,32 @@ public static class AzureStartupValidator
         if (echoEnabled && !keyAllowedEnvironment)
         {
             failures.Add("Workflows:Echo:Enabled=true is allowed only in Development, Dev and Test.");
+        }
+
+        return failures;
+    }
+
+    /// <summary>
+    /// Extra rules for <c>--smoke-check</c> (ADR 0003 section 1a): its purpose is to exercise the managed-identity path,
+    /// so it refuses Key mode and any configured Cosmos/Search key. Messages name configuration keys only.
+    /// </summary>
+    public static IReadOnlyList<string> ValidateSmokeCheck(IConfiguration configuration)
+    {
+        var failures = new List<string>();
+        if (!Enum.TryParse<AzureAuthMode>(configuration["Azure:AuthMode"]?.Trim(), ignoreCase: true, out var mode)
+            || mode != AzureAuthMode.ManagedIdentity)
+        {
+            failures.Add("--smoke-check requires Azure:AuthMode=ManagedIdentity.");
+        }
+
+        if (!string.IsNullOrEmpty(configuration["Cosmos:Key"]))
+        {
+            failures.Add("--smoke-check requires Cosmos:Key to be unset.");
+        }
+
+        if (!string.IsNullOrEmpty(configuration["Search:Key"]))
+        {
+            failures.Add("--smoke-check requires Search:Key to be unset.");
         }
 
         return failures;

@@ -13,6 +13,7 @@ using SupportChat.Infrastructure.Azure;
 using SupportChat.Infrastructure.Health;
 using SupportChat.Infrastructure.Models;
 using SupportChat.Infrastructure.Search;
+using SupportChat.Infrastructure.Smoke;
 using SupportChat.Infrastructure.Storage.Cosmos;
 
 namespace SupportChat.Infrastructure;
@@ -48,6 +49,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<IKnowledgeSearch, AzureSearchKnowledgeSearch>();
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
+        services.AddSmokeChecks();
         return services;
     }
 }

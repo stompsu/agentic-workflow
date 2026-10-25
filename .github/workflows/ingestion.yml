@@ -1,0 +1,62 @@
+name: Run ingestion job
+
+# Manual: starts the Container Apps ingestion job (chunk + embed + upsert to AI Search) in one environment.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [dev, test, prod]
+        default: dev
+      tag:
+        description: Optional image tag of support-ingestion to run (empty = the job's current image)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  ingest:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: ingestion-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+      ACR: ${{ vars.ACR_NAME }}
+      INGESTION_JOB: ${{ vars.INGESTION_JOB }}
+      TAG: ${{ inputs.tag }}
+      ENV_NAME: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate tag
+        run: |
+          if [ -n "$TAG" ] && ! [[ "$TAG" =~ ^[0-9a-f]{7,40}$ ]]; then
+            echo "::error::tag must match ^[0-9a-f]{7,40}$ (a git short SHA)"; exit 1
+          fi
+      - name: Require INGESTION_JOB
+        run: |
+          if [ -z "$INGESTION_JOB" ]; then
+            echo "::error::INGESTION_JOB is not set for environment $ENV_NAME"; exit 1
+          fi
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Start job and wait
+        run: |
+          az config set extension.use_dynamic_install=yes_without_prompt
+          if [ -n "$TAG" ]; then
+            az containerapp job update -n "$INGESTION_JOB" -g "$RG" --image "$ACR.azurecr.io/support-ingestion:$TAG"
+          fi
+          EXEC=$(az containerapp job start -n "$INGESTION_JOB" -g "$RG" --query name -o tsv)
+          echo "Started execution $EXEC"
+          .github/scripts/wait-job-execution.sh "$INGESTION_JOB" "$RG" "$EXEC" 1800

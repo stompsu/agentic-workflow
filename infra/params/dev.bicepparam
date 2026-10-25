@@ -17,3 +17,9 @@ param apiScope = 'api://REPLACE_ME/access_as_user'
 param foundryProjectResourceId = ''
 param foundryProjectEndpoint = ''
 param writeSearchQueryKeyFromBicep = true
+
+// Ingestion job (manual trigger). Needs foundryProjectEndpoint, modelResourceId (or vectorizerResourceUri) and an
+// image built from Dockerfile.ingestion (knowledge/ at /app/knowledge). Pass ingestionImage from the pipeline.
+param deployIngestionJob = false
+param embeddingDeployment = 'text-embedding-3-small'
+param modelResourceId = '' // Foundry/Azure OpenAI account that hosts the embedding deployment

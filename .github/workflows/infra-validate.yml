@@ -1,0 +1,25 @@
+name: Infra validate
+
+# Pull requests only. No Azure login, no environment: just compiles the Bicep and the parameter files.
+on:
+  pull_request:
+    paths: ['infra/**', '.github/workflows/infra-validate.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: az bicep build --file infra/main.bicep --stdout > /dev/null
+      - name: build-params
+        run: |
+          for f in infra/params/*.bicepparam; do
+            az bicep build-params --file "$f" --stdout > /dev/null
+          done

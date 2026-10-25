@@ -1,0 +1,92 @@
+name: Deploy to environment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      run-mi-smoke:
+        description: Run the managed-identity smoke job (test only; blocks the caller's next stage on failure)
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    # One deploy (app or infra, see infra.yml) at a time per environment; never cancel a deploy midway.
+    concurrency:
+      group: env-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TAG: ${{ inputs.tag }}
+      RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+      ACR: ${{ vars.ACR_NAME }}
+      BACKEND_APP: ${{ vars.BACKEND_APP }}
+      FRONTEND_APP: ${{ vars.FRONTEND_APP }}
+      INGESTION_JOB: ${{ vars.INGESTION_JOB }}
+      MI_SMOKE_JOB: ${{ vars.MI_SMOKE_JOB }}
+      ENV_NAME: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy backend, then frontend
+        run: |
+          az config set extension.use_dynamic_install=yes_without_prompt
+          # Revision suffix: starts with a letter, lowercase, short, unique per run attempt.
+          SUFFIX="r${TAG}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          az containerapp update -n "$BACKEND_APP" -g "$RG" \
+            --image "$ACR.azurecr.io/support-backend:$TAG" \
+            --revision-suffix "$SUFFIX"
+          az containerapp update -n "$FRONTEND_APP" -g "$RG" \
+            --image "$ACR.azurecr.io/support-frontend:$TAG" \
+            --revision-suffix "$SUFFIX"
+
+      - name: Smoke test (through the frontend proxy)
+        run: |
+          FQDN=$(az containerapp show -n "$FRONTEND_APP" -g "$RG" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          for i in $(seq 1 18); do
+            if curl -fsS --max-time 10 "https://$FQDN/api/healthz" > /dev/null; then
+              echo "Healthy"; exit 0
+            fi
+            echo "Attempt $i failed, retrying"
+            sleep 10
+          done
+          echo "::error::Smoke test failed for https://$FQDN/api/healthz"; exit 1
+
+      # Keep the optional ingestion job on the same tag. It is not started here (see ingestion.yml).
+      - name: Update ingestion job image
+        if: vars.INGESTION_JOB != ''
+        run: |
+          az containerapp job update -n "$INGESTION_JOB" -g "$RG" \
+            --image "$ACR.azurecr.io/support-ingestion:$TAG"
+
+      # Pre-prod gate (ADR 0003 1a). The job definition in Bicep carries args=[--smoke-check],
+      # Azure__AuthMode=ManagedIdentity and no keys; updating only the image keeps all of that.
+      - name: Managed-identity smoke job
+        if: inputs.run-mi-smoke
+        run: |
+          if [ -z "$MI_SMOKE_JOB" ]; then
+            echo "::error::MI_SMOKE_JOB is not set for environment $ENV_NAME; the prod gate cannot pass without it"
+            exit 1
+          fi
+          az containerapp job update -n "$MI_SMOKE_JOB" -g "$RG" \
+            --image "$ACR.azurecr.io/support-backend:$TAG"
+          EXEC=$(az containerapp job start -n "$MI_SMOKE_JOB" -g "$RG" --query name -o tsv)
+          echo "Started execution $EXEC"
+          .github/scripts/wait-job-execution.sh "$MI_SMOKE_JOB" "$RG" "$EXEC" 600

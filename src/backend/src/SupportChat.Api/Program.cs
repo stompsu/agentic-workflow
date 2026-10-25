@@ -9,6 +9,7 @@ using SupportChat.Api.Endpoints;
 using SupportChat.Api.Http;
 using SupportChat.Core.Options;
 using SupportChat.Infrastructure;
+using SupportChat.Infrastructure.Smoke;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -47,6 +48,12 @@ builder.Services.AddResponseCompression(options =>
 
 var app = builder.Build();
 
+// ADR 0003 section 1a: run the managed-identity checks and exit; never serve HTTP.
+if (args.Contains(SmokeCheckCommand.Flag))
+{
+    return await SmokeCheckCommand.RunAsync(app.Services);
+}
+
 app.UseExceptionHandler(new ExceptionHandlerOptions
 {
     ExceptionHandler = context => Problems.WriteAsync(context, StatusCodes.Status500InternalServerError, Problems.Codes.InternalError),
@@ -66,5 +73,6 @@ api.MapSessionEndpoints();
 api.MapChatEndpoints();
 
 app.Run();
+return 0;
 
 public partial class Program;

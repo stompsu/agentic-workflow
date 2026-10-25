@@ -1,0 +1,83 @@
+name: Infra
+
+# Manual only (workflow_dispatch). Never runs automatically. Pull requests are validated by infra-validate.yml.
+# Needs role-assignment rights for the environment identity (see docs/cicd-setup.md section 5).
+# Alternative: deploy infra from the maintainer's machine and never dispatch this workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [dev, test, prod]
+        default: dev
+      what_if_only:
+        description: Only run what-if, do not deploy
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    # Shared with _deploy-env.yml: infra and app deploys of one environment never overlap.
+    concurrency:
+      group: env-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TARGET_ENV: ${{ inputs.environment }}
+      RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+      ACR: ${{ vars.ACR_NAME }}
+      BACKEND_APP: ${{ vars.BACKEND_APP }}
+      FRONTEND_APP: ${{ vars.FRONTEND_APP }}
+      INGESTION_JOB: ${{ vars.INGESTION_JOB }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check params for placeholders
+        run: infra/scripts/check-params.sh "infra/params/${TARGET_ENV}.bicepparam"
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # An infra redeploy with empty image params would reset the apps to the placeholder image.
+      # Read the images currently deployed and pass them back (only real ACR images; empty on first deploy).
+      # Done twice: before what-if and again right before create, so an app deploy that finished in between is not reverted.
+      - name: Resolve currently deployed images (for what-if)
+        id: images1
+        run: .github/scripts/resolve-images.sh
+
+      - name: What-if
+        env:
+          EXTRA_PARAMS: ${{ steps.images1.outputs.extra_params }}
+        run: |
+          # shellcheck disable=SC2086
+          az deployment group what-if \
+            --resource-group "$RG" \
+            --parameters "infra/params/${TARGET_ENV}.bicepparam" $EXTRA_PARAMS
+
+      - name: Re-resolve currently deployed images (for deploy)
+        id: images2
+        if: ${{ !inputs.what_if_only }}
+        run: .github/scripts/resolve-images.sh
+
+      - name: Deploy
+        if: ${{ !inputs.what_if_only }}
+        env:
+          EXTRA_PARAMS: ${{ steps.images2.outputs.extra_params }}
+        run: |
+          # shellcheck disable=SC2086
+          az deployment group create \
+            --resource-group "$RG" \
+            --name "infra-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}" \
+            --parameters "infra/params/${TARGET_ENV}.bicepparam" $EXTRA_PARAMS

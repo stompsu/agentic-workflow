@@ -4,6 +4,8 @@ param vaultName string
 param cosmosAccountName string
 param searchServiceName string
 param writeSearchQueryKey bool
+@description('Write the Search ADMIN key (search-admin-key) for the ingestion job. Read only by the ingestion identity; never given to the API.')
+param writeSearchAdminKey bool = false
 
 resource vault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
   name: vaultName
@@ -34,6 +36,16 @@ resource searchQueryKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (wri
   name: 'search-query-key'
   properties: {
     value: search.listQueryKeys().value[0].key
+    attributes: { enabled: true }
+  }
+}
+
+// Admin key: only when the dev/test ingestion job runs in Key mode. Never deployed for prod (this module is skipped there).
+resource searchAdminKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (writeSearchAdminKey) {
+  parent: vault
+  name: 'search-admin-key'
+  properties: {
+    value: search.listAdminKeys().primaryKey
     attributes: { enabled: true }
   }
 }

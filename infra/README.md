@@ -17,6 +17,7 @@ and a `what-if` before the first real deploy. No secret values exist in params o
 | `container-env` | Container Apps environment |
 | `containerapp` | Generic app: used for backend (internal ingress, `/healthz` startup+liveness, `/readyz` readiness, HTTP-concurrency scale rule, min replicas 1 in prod) and frontend (external ingress) |
 | `smoke-job` | test only, optional: manual Container Apps Job, `--smoke-check`, `Azure__AuthMode=ManagedIdentity`, no keys (ADR 0003 1a) |
+| `ingestion-job` | optional: manual Container Apps Job for the ingestion console app, dedicated identity `id-<base>-ingest` |
 | `role-foundry-project` | "Azure AI User" on an existing Foundry project, only if `foundryProjectResourceId` is set |
 | `role-model-account` | Search identity -> "Cognitive Services OpenAI User" on the embedding model resource, only if `modelResourceId` is set (Phase 2) |
 
@@ -69,15 +70,41 @@ on any placeholder. The infra pipeline (Phase 4) must run it before `what-if` / 
    `infra/scripts/ensure-search-query-key.sh <rg> <search-name> <key-vault-name>` (run by the user; never prints the key).
    The names come from the deployment outputs.
 4. App revisions: the deploy workflow (`az containerapp update --image ... --revision-suffix ...`) rolls the real images.
-5. Search index creation / ingestion: Phase 2 (not Bicep).
+5. Search index creation / ingestion: the ingestion job (see below).
 6. Test: after the backend image supports `--smoke-check`, set `deploySmokeJob = true` and pass `backendImage`.
+
+## Ingestion job
+
+Params: `deployIngestionJob` (default false), `ingestionImage` (`<acr>/support-ingestion:<tag>`, empty = no job),
+`embeddingDeployment`, `modelResourceId` (or `vectorizerResourceUri`), `foundryProjectEndpoint`, `foundryProjectResourceId`,
+`ingestionSourcePath` (default `/app/knowledge`; `Dockerfile.ingestion` must copy `knowledge/` there).
+Creates job `caj-<base>-ingest` (manual trigger, 0.5 cpu / 1Gi, replicaTimeout 1800 s, no retry) with a dedicated identity:
+
+| Env | Mode | Identity roles |
+|---|---|---|
+| dev/test | `Azure__AuthMode=Key`; `Ingestion__SearchAdminKey` = Key Vault secret `search-admin-key` (written by Bicep via `listAdminKeys()`) | AcrPull, Key Vault Secrets User, Azure AI User on the Foundry project, OpenAI User on the model account (the last two only if the ids are set) |
+| prod | `ManagedIdentity`, no keys, no admin-key secret | AcrPull, Search Index Data Contributor + Search Service Contributor on the Search service, Azure AI User on the project, OpenAI User on the model account |
+
+The API identity never gets Contributor roles on Search or the admin key. Env passed to the job: `ASPNETCORE_ENVIRONMENT`,
+`DOTNET_ENVIRONMENT`, `AZURE_CLIENT_ID` (ingestion identity), `AZURE_TOKEN_CREDENTIALS`, `Azure__AuthMode`, `Search__Endpoint`,
+`Search__IndexName`, `Ingestion__SourcePath`, `Ingestion__EmbeddingDeployment`, `Ingestion__VectorizerDeployment`,
+`Ingestion__VectorizerResourceUri` (from `vectorizerResourceUri` or `https://<model account>.openai.azure.com`),
+`Foundry__ProjectEndpoint`, and (dev/test) `Ingestion__SearchAdminKey` (secretRef). The app fails fast when the endpoint or
+vectorizer uri are missing, so set those params first.
+
+Start manually (after the image is pushed): `az containerapp job start -g <rg> -n <ingestionJobName>`; follow with
+`az containerapp job execution list -g <rg> -n <ingestionJobName>`. First-deploy order: infra with `deployIngestionJob=false`
+-> build/push `support-ingestion` -> redeploy infra with `deployIngestionJob=true` and `ingestionImage` (also pass the current
+backend/frontend images) -> wait for role propagation -> start the job -> deploy/verify the backend. The search service identity
+needs OpenAI User on the model account (`modelResourceId`) for the integrated vectorizer. Re-run the infra deploy if the first
+attempt fails on Key Vault / role propagation.
 
 ## Outputs for pipelines
 
 `resourceGroup`, `acrName`, `acrLoginServer`, `backendAppName`, `frontendAppName`, `frontendFqdn`,
 `managedIdentityClientId`, plus `keyVaultName`, `cosmosAccountName`, `searchServiceName`, `searchPrincipalId`,
-`smokeJobName` (empty unless the test smoke job exists). Map to GitHub environment vars: `AZURE_RESOURCE_GROUP`,
-`ACR_NAME`, `BACKEND_APP`, `FRONTEND_APP` (`MI_SMOKE_JOB` in test). `AZURE_CLIENT_ID` of the pipeline is the
+`smokeJobName` (empty unless the test smoke job exists), `ingestionJobName` (empty unless the ingestion job exists). Map to GitHub environment vars: `AZURE_RESOURCE_GROUP`,
+`ACR_NAME`, `BACKEND_APP`, `FRONTEND_APP` (`MI_SMOKE_JOB` in test, `INGESTION_JOB` for ingestion). `AZURE_CLIENT_ID` of the pipeline is the
 GitHub OIDC identity, NOT `managedIdentityClientId` (that is the app identity).
 
 ## Roles for the pipeline identity (per `github-azure-oidc-setup`; granted by the user)

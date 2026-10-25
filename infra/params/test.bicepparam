@@ -19,3 +19,9 @@ param foundryProjectEndpoint = ''
 param writeSearchQueryKeyFromBicep = true
 // Enable once a backend image with --smoke-check exists and backendImage is passed (ADR 0003 section 1a).
 param deploySmokeJob = false
+
+// Ingestion job (manual trigger). Needs foundryProjectEndpoint, modelResourceId (or vectorizerResourceUri) and an
+// image built from Dockerfile.ingestion (knowledge/ at /app/knowledge). Pass ingestionImage from the pipeline.
+param deployIngestionJob = false
+param embeddingDeployment = 'text-embedding-3-small'
+param modelResourceId = '' // Foundry/Azure OpenAI account that hosts the embedding deployment

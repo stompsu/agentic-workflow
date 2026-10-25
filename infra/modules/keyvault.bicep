@@ -4,6 +4,8 @@ param location string
 param tags object
 param enablePurgeProtection bool
 param kvReaderPrincipalId string = '' // empty = no role assignment (prod)
+@description('Further principals (e.g. the ingestion job identity) that receive Key Vault Secrets User. dev/test only.')
+param additionalSecretsUserPrincipalIds array = []
 
 var secretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
 
@@ -32,6 +34,16 @@ resource secretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (
     principalType: 'ServicePrincipal'
   }
 }
+
+resource extraSecretsUsers 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principalId in additionalSecretsUserPrincipalIds: {
+  name: guid(vault.id, principalId, secretsUserRoleId)
+  scope: vault
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', secretsUserRoleId)
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+  }
+}]
 
 output name string = vault.name
 output vaultUri string = vault.properties.vaultUri
