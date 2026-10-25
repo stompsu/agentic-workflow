@@ -1,0 +1,76 @@
+# Rendered at container start by the nginx image entrypoint (envsubst, filtered to BACKEND_*).
+# Only /api/ is proxied (api-contract section 7). The resolver is written by 10-write-config.sh.
+server {
+    listen 8080;
+    server_name _;
+    server_tokens off;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # api-contract section 6: nginx limit 64k (backend limit 32 KB).
+    client_max_body_size 64k;
+
+    include /etc/nginx/snippets/security-headers.conf;
+
+    # Frontend's own liveness/readiness (NOT proxied to the backend).
+    location = /healthz { access_log off; default_type text/plain; add_header Cache-Control "no-store" always; return 200 "ok\n"; }
+    location = /readyz  { access_log off; default_type text/plain; add_header Cache-Control "no-store" always; return 200 "ok\n"; }
+
+    # Runtime config written at container start: never cache.
+    location = /config.json {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-store" always;
+        try_files $uri =404;
+    }
+
+    # MSAL v5 redirect bridge: no-store, may be framed by this origin only (silent iframe fallback),
+    # and must not carry Cross-Origin-Opener-Policy.
+    location = /redirect.html {
+        include /etc/nginx/snippets/security-headers-bridge.conf;
+        add_header Cache-Control "no-store" always;
+        try_files $uri =404;
+    }
+
+    location /assets/ {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
+    location /api/ {
+        include /etc/nginx/snippets/security-headers.conf;
+
+        # Variable proxy_pass: DNS is re-resolved (resolver in conf.d/00-resolver.conf) instead of once at start.
+        # No URI part: the request URI is forwarded unchanged (no path rewrite).
+        set $backend_host "${BACKEND_UPSTREAM}";
+        proxy_pass https://$backend_host;
+
+        # Container Apps routes by Host and needs SNI.
+        proxy_ssl_server_name on;
+        proxy_ssl_name $backend_host;
+        proxy_set_header Host $backend_host;
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+
+        # SSE: no buffering, no caching, no compression, HTTP/1.1 keep-alive.
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+
+        # Turn timeout is 180 s; the Container Apps ingress limit is 240 s. Heartbeats arrive every 15 s.
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 300s;
+    }
+
+    # SPA fallback. index.html is never cached so a new deploy is picked up immediately.
+    location / {
+        add_header Cache-Control "no-cache" always;
+        include /etc/nginx/snippets/security-headers.conf;
+        try_files $uri $uri/ /index.html;
+    }
+}

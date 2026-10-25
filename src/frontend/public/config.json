@@ -1,0 +1,15 @@
+{
+  "auth": {
+    "clientId": "00000000-0000-0000-0000-000000000000",
+    "authority": "https://CHANGE-ME.ciamlogin.com/",
+    "knownAuthorities": ["CHANGE-ME.ciamlogin.com"],
+    "redirectUri": "/redirect.html",
+    "apiScopes": ["api://00000000-0000-0000-0000-000000000000/access_as_user"],
+    "providers": [
+      { "id": "google", "label": "Continue with Google", "domainHint": "google" },
+      { "id": "facebook", "label": "Continue with Facebook", "domainHint": "facebook" }
+    ]
+  },
+  "app": { "title": "Assistant", "tagline": "Sign in to continue." },
+  "apiBaseUrl": "/api"
+}

@@ -34,7 +34,9 @@ Owners: architect (contract), backend-dotnet (server), frontend-react (client), 
 `/api/healthz` is the pipeline smoke-test target (`https://<frontend fqdn>/api/healthz`). Health responses:
 `{"status":"ok"}` or `{"status":"unavailable"}` (503). They never include config, dependency versions or errors.
 Aliases `/healthz` and `/readyz` exist only for Container Apps probes on the backend container port; nginx proxies
-only `/api/`, so the aliases are not reachable through the frontend.
+only `/api/`, so the backend aliases are not reachable through the frontend. The frontend nginx answers its own
+`/healthz` and `/readyz` locally (plain-text 200, for the frontend container's probes); these are separate endpoints
+and say nothing about the backend.
 
 ### 2.1 Session creation decision
 

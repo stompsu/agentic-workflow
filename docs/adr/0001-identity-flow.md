@@ -22,10 +22,14 @@ API (Microsoft.Identity.Web JWT bearer)
 ```
 
 ### SPA
-- `@azure/msal-browser` + `@azure/msal-react`, `PublicClientApplication`, `loginRedirect`, authorization code + PKCE
-  (MSAL default for SPA platform redirect URIs).
+- `@azure/msal-browser` v5 (5.26.0) + `@azure/msal-react`, `PublicClientApplication`, `loginRedirect`,
+  authorization code + PKCE (MSAL default for SPA platform redirect URIs).
 - Config from runtime `/config.json`: `authority = https://<tenant-subdomain>.ciamlogin.com/`, `clientId` = SPA app id,
-  `apiScopes = ["api://<api-client-id>/access_as_user"]`, `redirectUri = "/"` (resolved to origin + "/").
+  `knownAuthorities` (hosts; default = authority host; may need `<tenant-guid>.ciamlogin.com`, see Q1),
+  `apiScopes = ["api://<api-client-id>/access_as_user"]`, `redirectUri = "/redirect.html"` (resolved to
+  `<origin>/redirect.html`). MSAL v5 requires `redirectUri` to point to a redirect bridge page that calls
+  `broadcastResponseToMainFrame()` (MSAL.js `lib/msal-browser/docs/redirect-bridge.md`, `v4-migration.md`).
+  Post-logout redirect URI = `<origin>/`. Registered URIs: auth-setup section 6.
 - Login request includes the API scope so consent/token for the API happen at sign-in.
 - Provider buttons come from config; each passes `extraQueryParameters: { domain_hint: "google" | "facebook" }`
   (documented "issuer acceleration" values). If the hint does not route reliably in our tenant, buttons fall back to
@@ -52,6 +56,8 @@ API (Microsoft.Identity.Web JWT bearer)
 - Issuer: Microsoft.Identity.Web reads the tenant metadata from the ciamlogin.com authority. Community reports show
   CIAM tokens with issuer `https://<tenant-id>.ciamlogin.com/<tenant-id>/v2.0`; Phase 1 includes an integration test
   with a real dev-tenant token to confirm validation passes (no custom issuer overrides unless that test fails; Q1).
+  Part of Q1 on the SPA side: if the tenant issues tokens or redirects on the GUID host, add
+  `<tenant-id>.ciamlogin.com` to the SPA `knownAuthorities` (`AUTH_KNOWN_AUTHORITIES`).
 
 ### Data scoping
 - `userId` = `oid` string (lowercase GUID) is the Cosmos partition key and a filter on every query.

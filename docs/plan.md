@@ -295,8 +295,10 @@ Durations are `TimeSpan` strings (`hh:mm:ss`).
 Ingestion adds `Ingestion:EmbeddingDeployment`, `Ingestion:SourcePath`, `Ingestion:ChunkTokens` (800),
 `Ingestion:ChunkOverlapTokens` (80), `Ingestion:SearchAdminKey` (Key mode only, secret; never set on the API).
 
-Frontend container env: `AUTH_CLIENT_ID`, `AUTH_AUTHORITY`, `AUTH_API_SCOPE`, `AUTH_PROVIDERS` (optional),
-`BACKEND_UPSTREAM` (backend internal FQDN for nginx `proxy_pass` and `Host`).
+Frontend container env (none secret; defaults and formats in /docs/auth-setup.md section 7): required
+`BACKEND_UPSTREAM` (backend internal FQDN, bare host, for nginx `proxy_pass` and `Host`), `AUTH_CLIENT_ID`,
+`AUTH_AUTHORITY`, `AUTH_API_SCOPE`; optional `AUTH_PROVIDERS`, `AUTH_KNOWN_AUTHORITIES`, `AUTH_REDIRECT_URI`
+(default `/redirect.html`), `API_BASE_URL` (default `/api`).
 
 ## 6. Decisions and open questions
 
@@ -328,16 +330,15 @@ D10. Custom domain for the frontend now or later (affects SPA redirect URIs; Lea
     not work through External ID custom URL domains, so keep ciamlogin.com for auth).
 
 Q1. External ID issuer: community reports tokens with `iss = https://<tid>.ciamlogin.com/<tid>/v2.0`; Phase 1 must
-    validate a real token through Microsoft.Identity.Web before relying on defaults.
-Q4. Local Node is v20.12.2. Current Vite (8.x) requires Node 20.19+ or 22.12+, so `npm create vite` / `vite build`
-    will fail locally. Upgrade local Node (recommend Node 22 LTS or newer; Node 20 reached end of life in April 2026)
-    and use the same major in the frontend Dockerfile build stage. (Needed by Phase 3.)
+    validate a real token through Microsoft.Identity.Web before relying on defaults. Frontend side: if the tenant
+    uses the GUID host, add `<tid>.ciamlogin.com` to `AUTH_KNOWN_AUTHORITIES` (auth-setup sections 7-8).
 Q5. Container Apps HTTP ingress has a 240 s request timeout; the 180 s turn timeout assumes no answer needs longer.
     Confirm acceptable; long-running workflow types would need a different pattern (background job + polling).
 Q6. `domain_hint=google|facebook` is documented on Learn, but community threads report inconsistent behavior; verify in
     the nonprod tenant (fallback: hosted provider chooser).
 
 ### Resolved
+Q4. Local Node upgraded to v26.12.1 (2026-10-25); frontend Docker build stage and `engines` use Node 24 LTS.
 Q2. Pipeline templates now exist in `.claude/skills/github-actions-pipelines/templates/`; devops-pipelines uses them.
 Q3. actionlint is being installed locally; devops-pipelines lints with it.
 (Q7, agent file names, fixed and removed.)

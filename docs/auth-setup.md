@@ -118,37 +118,66 @@ default, i.e. two different `oid`s and two separate chat histories (ADR 0001). N
 
 ## 6. SPA redirect URIs (platform: Single-page application)
 
-MSAL uses `redirectUri: "/"`, resolved to `<origin>/`; register exactly with the trailing slash.
+The SPA uses `@azure/msal-browser` v5 (5.26.0), which requires a redirect bridge page: `redirectUri` must point to a
+page that calls `broadcastResponseToMainFrame()` from `@azure/msal-browser/redirect-bridge`, and the registered URI must
+match exactly (path, protocol, port). Sources: MSAL.js
+[redirect-bridge.md](https://github.com/AzureAD/microsoft-authentication-library-for-js/blob/dev/lib/msal-browser/docs/redirect-bridge.md)
+and [v4-migration.md](https://github.com/AzureAD/microsoft-authentication-library-for-js/blob/dev/lib/msal-browser/docs/v4-migration.md).
+Our bridge is `/redirect.html` (served by nginx with `Cache-Control: no-store` and no COOP header, as the docs require),
+so the redirect URI is `<origin>/redirect.html`.
 
 | Env | Redirect URIs |
 |---|---|
-| dev | `http://localhost:5173/`, `https://<dev-frontend-fqdn>/` |
-| test | `https://<test-frontend-fqdn>/` |
-| prod | `https://<prod-frontend-fqdn>/` (or the custom domain once chosen) |
+| dev | `http://localhost:5173/redirect.html`, `https://<dev-frontend-fqdn>/redirect.html` |
+| test | `https://<test-frontend-fqdn>/redirect.html` |
+| prod | `https://<prod-frontend-fqdn>/redirect.html` (or the custom domain once chosen) |
 
 `<env-frontend-fqdn>` = Container App FQDN from azure-infra outputs, e.g. `ca-supportchat-web-dev.<env-unique>.<region>.azurecontainerapps.io`.
-Set post-logout redirect to the same origin. Localhost is allowed only in the dev registration.
+Post-logout redirect URI is `<origin>/` (the SPA uses `logoutRedirect`, for which the bridge is not needed).
+Localhost is allowed only in the dev registration.
 
 ## 7. Resulting configuration
 
-Frontend runtime config (`/config.json`, generated at container start from env vars; local: `public/config.json`, git-ignored):
+Frontend runtime config (`/config.json`, generated at container start from env vars):
 ```json
 {
   "auth": {
     "clientId": "<spa-id>",
     "authority": "https://<sub>.ciamlogin.com/",
-    "redirectUri": "/",
+    "knownAuthorities": ["<sub>.ciamlogin.com"],
+    "redirectUri": "/redirect.html",
     "apiScopes": ["api://<api-id>/access_as_user"],
     "providers": [
       { "id": "google",   "label": "Continue with Google",   "domainHint": "google" },
       { "id": "facebook", "label": "Continue with Facebook", "domainHint": "facebook" }
     ]
   },
-  "apiBaseUrl": "/api"
+  "apiBaseUrl": "/api",
+  "app": { "title": "Assistant", "tagline": "Sign in to continue." }
 }
 ```
-Container env vars: `AUTH_CLIENT_ID`, `AUTH_AUTHORITY`, `AUTH_API_SCOPE`, `AUTH_PROVIDERS` (JSON, optional; default both).
-None of these are secrets.
+`app.title` and `app.tagline` are optional display text (defaults shown); keep them workflow-neutral.
+`auth.knownAuthorities` is an array of hosts; if omitted it defaults to the host of `auth.authority`. If the tenant
+issues tokens or redirects on the GUID host, add `<tid>.ciamlogin.com` as well (to be confirmed together with Q1).
+
+The repo commits `src/frontend/public/config.json` with placeholders only (`CHANGE-ME`, zero GUIDs) for local dev.
+Real values come only from the container env vars below at start. There is no local override file; developers edit the
+placeholders locally and must not commit real values.
+
+Frontend container env vars (none are secrets):
+
+| Variable | Required | Value / default |
+|---|---|---|
+| `BACKEND_UPSTREAM` | yes | backend internal FQDN, bare host (no scheme or port); nginx `proxy_pass`, `Host`, SNI |
+| `AUTH_CLIENT_ID` | yes | `<spa-id>` |
+| `AUTH_AUTHORITY` | yes | `https://<sub>.ciamlogin.com/` |
+| `AUTH_API_SCOPE` | yes | `api://<api-id>/access_as_user` (comma-separated for several) |
+| `AUTH_PROVIDERS` | no | JSON array `[{id,label,domainHint}]`; default Google + Facebook |
+| `AUTH_KNOWN_AUTHORITIES` | no | comma-separated hosts; default host of `AUTH_AUTHORITY` |
+| `AUTH_REDIRECT_URI` | no | default `/redirect.html` |
+| `API_BASE_URL` | no | default `/api` |
+| `APP_TITLE` | no | default `Assistant` |
+| `APP_TAGLINE` | no | default `Sign in to continue.` |
 
 Backend (`appsettings.json` structure; values via env vars `AzureAd__Instance` etc. per environment):
 ```json
@@ -172,5 +201,6 @@ Backend (`appsettings.json` structure; values via env vars `AzureAd__Instance` e
 
 ## 8. Checks after setup
 - Decode an access token from the SPA (dev): `aud` = `<api-id>`, `scp` contains `access_as_user`, `oid` present,
-  `ver` = `2.0`, record the exact `iss` for the backend integration test (ADR 0001, Q1).
+  `ver` = `2.0`, record the exact `iss` for the backend integration test (ADR 0001, Q1). If `iss` or the login redirects
+  use `<tid>.ciamlogin.com`, add that host to `AUTH_KNOWN_AUTHORITIES`.
 - Call `GET /api/workflows` with and without the token: 200 / 401 (401 body is ProblemDetails `code: unauthorized`).

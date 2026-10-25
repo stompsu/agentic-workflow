@@ -1,0 +1,54 @@
+import { describe, expect, it } from 'vitest';
+import { ConfigError, loadConfig, parseConfig } from './config';
+import { json } from '../test/helpers';
+
+const valid = {
+  auth: {
+    clientId: 'spa-id',
+    authority: 'https://contoso.ciamlogin.com/',
+    apiScopes: ['api://api-id/access_as_user'],
+    providers: [{ id: 'google', label: 'Continue with Google', domainHint: 'google' }],
+  },
+};
+
+describe('config', () => {
+  it('parses the documented shape and applies defaults', () => {
+    const c = parseConfig(valid);
+    expect(c.apiBaseUrl).toBe('/api');
+    expect(c.branding).toEqual({ title: 'Assistant', tagline: 'Sign in to continue.' });
+    expect(c.auth.redirectUri).toBe('/redirect.html');
+    expect(c.auth.knownAuthorities).toEqual(['contoso.ciamlogin.com']);
+    expect(c.auth.providers[0]).toEqual({ id: 'google', label: 'Continue with Google', domainHint: 'google' });
+  });
+
+  it('reads optional app.title and app.tagline', () => {
+    expect(parseConfig({ ...valid, app: { title: ' Acme ', tagline: 'Hi' } }).branding).toEqual({ title: 'Acme', tagline: 'Hi' });
+  });
+
+  it('keeps explicit values and ignores unknown properties', () => {
+    const c = parseConfig({ ...valid, apiBaseUrl: '/x/', extra: 1, auth: { ...valid.auth, knownAuthorities: ['a', 'b'], redirectUri: '/' } });
+    expect(c.apiBaseUrl).toBe('/x');
+    expect(c.auth.knownAuthorities).toEqual(['a', 'b']);
+    expect(c.auth.redirectUri).toBe('/');
+  });
+
+  it.each([null, {}, { auth: {} }, { auth: { ...valid.auth, clientId: '' } }, { auth: { ...valid.auth, apiScopes: [] } }])('rejects invalid config %#', (bad) => {
+    expect(() => parseConfig(bad)).toThrow(ConfigError);
+  });
+
+  it('loadConfig fetches /config.json with no-store', async () => {
+    let seen: RequestInit | undefined;
+    const fetchImpl = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+      seen = init;
+      return json(valid);
+    }) as typeof fetch;
+    const c = await loadConfig(fetchImpl);
+    expect(c.auth.clientId).toBe('spa-id');
+    expect(seen?.cache).toBe('no-store');
+  });
+
+  it('loadConfig reports HTTP and network failures', async () => {
+    await expect(loadConfig((async () => new Response('', { status: 404 })) as typeof fetch)).rejects.toThrow(/404/);
+    await expect(loadConfig((async () => { throw new TypeError('x'); }) as typeof fetch)).rejects.toThrow(ConfigError);
+  });
+});
