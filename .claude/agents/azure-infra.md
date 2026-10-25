@@ -14,4 +14,5 @@ You own /infra and pipelines.
 - Ingestion as a Container Apps Job or a script, not part of the web app.
 - Entra External ID app registrations and provider federation (Google/Facebook) are manual/portal steps: document them in /docs/auth-setup.md
   with exact redirect URIs per environment instead of trying to automate them.
-- CI: build, test, push images, `az containerapp` revision deploy per environment. Never run commands against real resources without asking me.
+- CI/CD workflows belong to devops-pipelines. You expose what they need as Bicep outputs
+  (resource group, ACR name, backend/frontend app names) and document identity roles the pipeline identity requires.

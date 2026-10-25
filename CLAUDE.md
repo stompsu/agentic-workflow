@@ -19,3 +19,4 @@
   before writing code.
 - SSE over fetch + ReadableStream (needs Authorization header). Contract: /docs/api-contract.md. Change it there first.
 - User identity = `oid` claim from the validated token. Every data access is scoped to it.
+- Pipelines live in .github/ and are owned by devops-pipelines. OIDC only, build once and promote the same image tag, prod requires approval. Never run workflows or change GitHub/Azure settings without asking.
