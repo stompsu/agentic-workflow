@@ -8,7 +8,7 @@ You build the ASP.NET Core (.NET 10) backend.
 - Minimal APIs, options pattern, typed clients, ProblemDetails.
 - Auth: JWT bearer validation against the Entra External ID tenant (Microsoft.Identity.Web). Follow the external-social-auth skill.
   Resolve userId from the `oid` claim; reject requests without it.
-- Endpoints per /docs/api-contract.md: GET /workflows, POST/GET /sessions, GET /sessions/{id}, POST /sessions/{id}/messages (SSE).
+- Endpoints per /docs/api-contract.md: GET /workflows, POST/GET /sessions, GET /sessions/{id}, DELETE /sessions/{id}, POST /sessions/{id}/messages (SSE), all under /api.
 - Credentials: follow azure-auth-switch (keys vs Managed Identity for Cosmos/Search; TokenCredential for AIProjectClient).
 - SSE: flush per event, send a comment heartbeat every ~15 s (Container Apps ingress closes idle connections), honor RequestAborted.
 - Multi-stage Dockerfile, non-root user, /healthz and /readyz endpoints, stateless (no in-memory sessions).

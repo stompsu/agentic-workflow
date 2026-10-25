@@ -10,7 +10,12 @@ You own /infra and pipelines.
 - Backend app: ingress external via the frontend proxy only (backend ingress internal), min replicas 1 in prod, HTTP-concurrency scale rule.
 - Prod: managed identity with least privilege: Cosmos data-plane role (sqlRoleAssignments), Search Index Data Reader (+ Contributor
   only for the ingestion job), Azure AI User on the Foundry project, AcrPull. Disable key/local auth on Cosmos and Search in prod.
-- Dev/Test: Cosmos and Search keys as Key Vault secret references; service principal env vars for Foundry access.
+- Dev/Test: Cosmos and Search keys as Key Vault secret references (Key Vault Secrets User for the app identity).
+- Foundry access in EVERY environment: the user-assigned managed identity with Azure AI User on the Foundry project
+  (AZURE_CLIENT_ID set on the app). No service principal secrets.
+- Test: the app identity also gets the prod data-plane roles and test Search uses `aadOrApiKey`, so the pre-prod
+  managed-identity smoke job (ADR 0003 §1a) can run with no keys. AI Search's own identity needs access to the embedding
+  deployment for the integrated vectorizer (see /docs/data-model.md).
 - Ingestion as a Container Apps Job or a script, not part of the web app.
 - Entra External ID app registrations and provider federation (Google/Facebook) are manual/portal steps: document them in /docs/auth-setup.md
   with exact redirect URIs per environment instead of trying to automate them.
