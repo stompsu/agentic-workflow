@@ -14,10 +14,20 @@ namespace SupportChat.Infrastructure.Search;
 /// Search embeds the query, so no embedding client is needed here.
 /// </summary>
 public sealed class AzureSearchKnowledgeSearch(
-    SearchClient client,
+    Lazy<SearchClient> lazyClient,
     IOptions<SearchServiceOptions> options,
     ILogger<AzureSearchKnowledgeSearch> logger) : IKnowledgeSearch
 {
+    // The client is resolved on first search, never while the workflow registry is built during startup validation
+    // (ADR 0003 section 4: validation must run before any client is constructed).
+    private SearchClient client => lazyClient.Value;
+
+    public AzureSearchKnowledgeSearch(
+        SearchClient client, IOptions<SearchServiceOptions> options, ILogger<AzureSearchKnowledgeSearch> logger)
+        : this(new Lazy<SearchClient>(client), options, logger)
+    {
+    }
+
     public async Task<IReadOnlyList<KnowledgeChunk>> SearchAsync(string domain, string query, int top, CancellationToken cancellationToken)
     {
         var filter = DomainValue.ToFilter(domain);

@@ -56,8 +56,12 @@ public sealed class SupportTicketWorkflow : IWorkflowDefinition
     private readonly IChatClientFactory _clients;
     private readonly IKnowledgeSearch _search;
     private readonly IPromptProvider _prompts;
-    private readonly SupportTicketOptions _options;
-    private readonly int _searchTop;
+    // Options are read lazily: the registry is built while startup validation runs, and reading validated options
+    // here would surface one options class's failures instead of all of them.
+    private readonly IOptions<SupportTicketOptions> _optionsAccessor;
+    private readonly IOptions<SearchServiceOptions> _searchOptions;
+    private SupportTicketOptions _options => _optionsAccessor.Value;
+    private int _searchTop => Math.Max(1, _searchOptions.Value.TopK);
     private readonly ILogger<SupportTicketWorkflow> _logger;
 
     public SupportTicketWorkflow(
@@ -71,8 +75,8 @@ public sealed class SupportTicketWorkflow : IWorkflowDefinition
         _clients = clients;
         _search = search;
         _prompts = prompts;
-        _options = options.Value;
-        _searchTop = Math.Max(1, searchOptions.Value.TopK);
+        _optionsAccessor = options;
+        _searchOptions = searchOptions;
         _logger = logger;
     }
 

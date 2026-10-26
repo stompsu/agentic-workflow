@@ -73,7 +73,35 @@ api.MapSessionEndpoints();
 api.MapMeEndpoints();
 api.MapChatEndpoints();
 
-app.Run();
-return 0;
+// A failed host start (startup validation, ADR 0003 section 4) must end the process with exit code 1 and key-name-only
+// messages. Letting the exception escape Main hung the container on crash handling (100% CPU, no exit).
+var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+try
+{
+    await app.RunAsync();
+    return 0;
+}
+catch (Exception ex) when (ex is not Microsoft.Extensions.Hosting.HostAbortedException) // tooling/test hosts abort Run on purpose
+{
+    var failures = StartupFailure.Messages(ex);
+    try
+    {
+        startupLogger.LogCritical("Startup failed: {Failures}", string.Join(" | ", failures));
+    }
+    catch (ObjectDisposedException)
+    {
+        // The host (and its logger providers) is already disposed after a failed start; fall back to stderr.
+        await Console.Error.WriteLineAsync("Startup failed: " + string.Join(" | ", failures));
+    }
+
+
+    // Hosted by a test/tooling host (WebApplicationFactory): let it observe the original exception.
+    if (!string.Equals(System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name, typeof(Program).Assembly.GetName().Name, StringComparison.Ordinal))
+    {
+        throw;
+    }
+
+    return 1;
+}
 
 public partial class Program;

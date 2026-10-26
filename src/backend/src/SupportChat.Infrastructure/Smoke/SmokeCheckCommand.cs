@@ -33,12 +33,13 @@ public static class SmokeCheckCommand
         catch (Exception ex)
         {
             logger.LogError("Smoke check refused: startup validation failed ({ExceptionType})", ex.GetType().Name);
-            if (ex is OptionsValidationException validation)
+            // StartupValidator.Validate aggregates one OptionsValidationException per options class.
+            var validations = ex is AggregateException aggregate
+                ? aggregate.InnerExceptions.OfType<OptionsValidationException>()
+                : ex is OptionsValidationException single ? [single] : [];
+            foreach (var failure in validations.SelectMany(v => v.Failures))
             {
-                foreach (var failure in validation.Failures)
-                {
-                    logger.LogError("Startup validation: {Failure}", failure); // names configuration keys only
-                }
+                logger.LogError("Startup validation: {Failure}", failure); // names configuration keys only
             }
 
             return 1;

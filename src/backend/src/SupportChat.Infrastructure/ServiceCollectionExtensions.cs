@@ -3,6 +3,7 @@ using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SupportChat.Core.Health;
 using SupportChat.Core.Knowledge;
@@ -47,7 +48,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMessageStore, CosmosMessageStore>();
         services.AddSingleton<IReadinessCheck, CosmosReadinessCheck>();
 
-        services.AddSingleton<IKnowledgeSearch, AzureSearchKnowledgeSearch>();
+        services.AddSingleton<IKnowledgeSearch>(sp => new AzureSearchKnowledgeSearch(
+            new Lazy<SearchClient>(() => sp.GetRequiredService<SearchClient>()),
+            sp.GetRequiredService<IOptions<SearchServiceOptions>>(),
+            sp.GetRequiredService<ILogger<AzureSearchKnowledgeSearch>>()));
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
         services.AddSmokeChecks();
         return services;
