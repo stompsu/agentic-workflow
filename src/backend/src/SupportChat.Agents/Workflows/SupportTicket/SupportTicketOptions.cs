@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using SupportChat.Core.Options;
 
 namespace SupportChat.Agents.Workflows.SupportTicket;
 
@@ -48,9 +49,10 @@ public sealed class SupportTicketOptionsValidator : IValidateOptions<SupportTick
 
         foreach (var key in SupportTicketWorkflow.AgentKeys)
         {
-            if (!options.Agents.TryGetValue(key, out var agent) || string.IsNullOrWhiteSpace(agent.Deployment))
+            if (!options.Agents.TryGetValue(key, out var agent) || string.IsNullOrWhiteSpace(agent.Deployment)
+                || ConfigPlaceholders.HasPlaceholder(agent.Deployment))
             {
-                errors.Add($"{SupportTicketOptions.SectionName}:Agents:{key}:Deployment is required.");
+                errors.Add($"{SupportTicketOptions.SectionName}:Agents:{key}:Deployment is required and must not be a placeholder.");
             }
         }
 

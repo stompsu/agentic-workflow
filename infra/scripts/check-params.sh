@@ -9,6 +9,14 @@ for f in "${files[@]}"; do
   if grep -nE "REPLACE_ME|00000000-0000-0000-0000-000000000000" "$f" | grep -vE '^[0-9]+:[[:space:]]*//'; then
     echo "ERROR: placeholder values in $f" >&2; bad=1
   fi
+  # Deployment names must not be empty (embeddingDeployment only matters when the ingestion job is enabled).
+  req="orchestratorDeployment specialistDeployment"
+  grep -qE "^[[:space:]]*param[[:space:]]+deployIngestionJob[[:space:]]*=[[:space:]]*true" "$f" && req="$req embeddingDeployment"
+  for p in $req; do
+    if grep -qE "^[[:space:]]*param[[:space:]]+${p}[[:space:]]*=[[:space:]]*''" "$f"; then
+      echo "ERROR: $p is empty in $f" >&2; bad=1
+    fi
+  done
 done
 [ $bad -eq 0 ] && echo "check-params: OK"
 exit $bad

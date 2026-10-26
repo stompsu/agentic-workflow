@@ -148,6 +148,20 @@ public class StartupTests
     }
 
     [Fact]
+    public async Task Missing_RetentionDays_outside_Development_does_not_start()
+    {
+        var message = await StartFailureAsync(new ApiFactory(configure: c => c.Remove("Chat:RetentionDays")));
+        Assert.Contains("Chat:RetentionDays", message);
+    }
+
+    [Fact]
+    public async Task Out_of_range_DeleteUserDataBudget_does_not_start()
+    {
+        var message = await StartFailureAsync(new ApiFactory(configure: c => c["Chat:DeleteUserDataBudget"] = "00:00:01"));
+        Assert.Contains("Chat:DeleteUserDataBudget", message);
+    }
+
+    [Fact]
     public async Task Missing_AuthMode_does_not_start()
     {
         var message = await StartFailureAsync(new ApiFactory(configure: c => c["Azure:AuthMode"] = ""));
@@ -173,6 +187,21 @@ public class StartupTests
     {
         var message = await StartFailureAsync(new ApiFactory(configure: c => c["Workflows:SupportTicket:Agents:Claims:Deployment"] = ""));
         Assert.Contains("Claims:Deployment", message);
+    }
+
+    [Fact]
+    public async Task Appsettings_placeholder_deployments_without_overrides_do_not_start()
+    {
+        var message = await StartFailureAsync(new ApiFactory(configure: c =>
+        {
+            foreach (var key in new[] { "Orchestrator", "Policy", "Claims", "HealthAssessments" })
+            {
+                c.Remove($"Workflows:SupportTicket:Agents:{key}:Deployment");
+            }
+        }));
+        Assert.Contains("Orchestrator:Deployment", message);
+        Assert.Contains("HealthAssessments:Deployment", message);
+        Assert.DoesNotContain("chat-deployment", message);
     }
 
     private sealed class FakeEcho : SupportChat.Core.Workflows.IWorkflowDefinition

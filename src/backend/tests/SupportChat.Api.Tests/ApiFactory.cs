@@ -89,7 +89,12 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         configure?.Invoke(Config);
         ExtraServices = services;
         Time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 25, 10, 0, 0, TimeSpan.Zero));
-        Store = new InMemoryChatStore(Time);
+        Store = new InMemoryChatStore(
+            Time,
+            new SupportChat.Core.Options.ChatLimitsOptions
+            {
+                RetentionDays = int.TryParse(Config.GetValueOrDefault("Chat:RetentionDays"), out var days) ? days : null,
+            });
     }
 
     public string Environment { get; }
@@ -109,6 +114,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     public static Dictionary<string, string?> BaseConfig() => new()
     {
         ["Azure:AuthMode"] = "Key",
+        ["Chat:RetentionDays"] = "30",
         ["AZURE_CLIENT_ID"] = "00000000-0000-0000-0000-0000000000aa",
         ["Cosmos:Endpoint"] = "https://localhost:8081/",
         ["Cosmos:Key"] = "dGVzdC1rZXk=",

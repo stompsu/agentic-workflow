@@ -5,7 +5,7 @@ import { ApiContext } from './api/ApiContext';
 import { ApiError } from './api/errors';
 import { AuthProvider } from './auth/AuthProvider';
 import { useAuth } from './auth/AuthContext';
-import { loadConfig, type AppConfig } from './config/config';
+import { loadConfig, type AppConfig, type AppInfoConfig } from './config/config';
 import { LoginPage } from './components/LoginPage';
 import { Workspace } from './components/Workspace';
 
@@ -23,7 +23,7 @@ export function createQueryClient(): QueryClient {
 }
 
 /** Signed-in tree: a fresh QueryClient and ApiClient per sign-in so no data survives a sign-out. */
-export function Authenticated({ apiBaseUrl, title }: { apiBaseUrl: string; title?: string }) {
+export function Authenticated({ apiBaseUrl, title, info }: { apiBaseUrl: string; title?: string; info?: AppInfoConfig }) {
   const auth = useAuth();
   const { getToken, handleAuthFailure } = auth;
   const [queryClient] = useState(createQueryClient);
@@ -39,7 +39,7 @@ export function Authenticated({ apiBaseUrl, title }: { apiBaseUrl: string; title
   return (
     <QueryClientProvider client={queryClient}>
       <ApiContext.Provider value={api}>
-        <Workspace {...(title !== undefined && { title })} />
+        <Workspace {...(title !== undefined && { title })} {...(info !== undefined && { info })} />
       </ApiContext.Provider>
     </QueryClientProvider>
   );
@@ -49,7 +49,7 @@ function AuthGate({ config }: { config: AppConfig }) {
   const { status } = useAuth();
   if (status === 'loading') return <p className="center-note" role="status">Signing in...</p>;
   if (status === 'anonymous') return <LoginPage providers={config.auth.providers} branding={config.branding} />;
-  return <Authenticated apiBaseUrl={config.apiBaseUrl} title={config.branding.title} />;
+  return <Authenticated apiBaseUrl={config.apiBaseUrl} title={config.branding.title} info={config.info} />;
 }
 
 export function App({ config }: { config: AppConfig }) {

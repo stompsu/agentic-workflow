@@ -13,6 +13,7 @@
     "test": "vitest run",
     "build": "tsc --noEmit && vite build && node scripts/check-dist.mjs",
     "preview": "vite preview",
+    "test:entrypoint": "sh scripts/test-entrypoint.sh",
     "e2e": "playwright test"
   },
   "dependencies": {

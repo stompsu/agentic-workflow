@@ -24,6 +24,13 @@ server {
         try_files $uri =404;
     }
 
+    # Public static page for Meta's "Data deletion instructions URL" (auth-setup 4.1): no auth, no JS, rendered at start.
+    location = /data-deletion.html {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+        try_files $uri =404;
+    }
+
     # MSAL v5 redirect bridge: no-store, may be framed by this origin only (silent iframe fallback),
     # and must not carry Cross-Origin-Opener-Policy.
     location = /redirect.html {

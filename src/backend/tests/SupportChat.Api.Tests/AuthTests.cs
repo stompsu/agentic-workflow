@@ -102,6 +102,7 @@ public class AuthTests : IDisposable
                      await client.GetAsync("/api/sessions"),
                      await client.GetAsync($"/api/sessions/{id}"),
                      await client.DeleteAsync($"/api/sessions/{id}"),
+                     await client.DeleteAsync("/api/me/data"),
                      await client.PostAsync("/api/sessions", Helpers.Json("""{"workflowId":"throwaway-test"}""")),
                  })
         {

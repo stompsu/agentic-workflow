@@ -23,9 +23,17 @@ export interface BrandingConfig {
 
 export const DEFAULT_BRANDING: BrandingConfig = { title: 'Assistant', tagline: 'Sign in to continue.' };
 
+export interface AppInfoConfig {
+  /** Days chat data is kept after last activity (1..3650). Absent = not shown. */
+  retentionDays?: number;
+  /** Plain-text contact (e.g. an email address) for sign-in account deletion. Rendered as text, never as HTML. */
+  supportContact?: string;
+}
+
 export interface AppConfig {
   auth: AuthConfig;
   branding: BrandingConfig;
+  info: AppInfoConfig;
   apiBaseUrl: string;
 }
 
@@ -89,7 +97,22 @@ export function parseConfig(raw: unknown): AppConfig {
   const app = isRecord(raw.app) ? raw.app : {};
   const nonEmpty = (v: unknown, fallback: string) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : fallback);
 
+  const info: AppInfoConfig = {};
+  if (app.retentionDays !== undefined && app.retentionDays !== null) {
+    const n = app.retentionDays;
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 3650) {
+      throw new ConfigError('config.json: "app.retentionDays" must be an integer from 1 to 3650');
+    }
+    info.retentionDays = n;
+  }
+  if (app.supportContact !== undefined && app.supportContact !== null) {
+    if (typeof app.supportContact !== 'string') throw new ConfigError('config.json: "app.supportContact" must be a string');
+    const contact = app.supportContact.trim();
+    if (contact !== '') info.supportContact = contact;
+  }
+
   return {
+    info,
     branding: { title: nonEmpty(app.title, DEFAULT_BRANDING.title), tagline: nonEmpty(app.tagline, DEFAULT_BRANDING.tagline) },
     auth: {
       clientId: str(auth.clientId, 'auth.clientId'),

@@ -7,7 +7,8 @@ Vite + React + TypeScript (strict). Node >= 24 (`.nvmrc`).
 | `npm run dev` | Vite dev server on :5173, `/api` proxied to `http://localhost:5080` (override with `BACKEND_URL`) |
 | `npm run lint` / `typecheck` / `test` | ESLint / `tsc --noEmit` / `vitest run` |
 | `npm run build` | `tsc` + `vite build` + `scripts/check-dist.mjs` (fails if e2e mock-auth code is in `dist/`) |
-| `npm run e2e` | Playwright happy path (needs browsers: `npx playwright install chromium`, not run automatically) |
+| `npm run test:entrypoint` | shell test of the container entrypoint (escaping, validation); needs `jq` |
+| `npm run e2e` | Playwright happy path + delete-my-data (needs browsers: `npx playwright install chromium`, not run automatically) |
 
 ## Runtime config
 
@@ -26,9 +27,23 @@ Container: written at start by `docker-entrypoint.d/10-write-config.sh` from env
 | `AUTH_REDIRECT_URI` | no | default `/redirect.html` (MSAL v5 redirect bridge; register `<origin>/redirect.html`) |
 | `APP_TITLE` | no | `app.title`: application name on the login page, top bar and document title; default `Assistant` |
 | `APP_TAGLINE` | no | `app.tagline`: line under the title on the login page; default `Sign in to continue.` |
+| `APP_RETENTION_DAYS` | no | integer 1..3650, same value as backend `Chat:RetentionDays`; `app.retentionDays` (sidebar note "Chats are kept for N days after last activity") and the retention text on `/data-deletion.html`. Invalid value: container fails to start |
+| `APP_SUPPORT_CONTACT` | no (prod: yes) | plain text, max 200 chars, no control characters (e.g. an email address); `app.supportContact` (shown in the "Delete my data" result notice) and `/data-deletion.html`. Always rendered as text, HTML-escaped |
 | `API_BASE_URL` | no | default `/api` |
 
 None are secrets.
+
+`/data-deletion.html` (+ `data-deletion.css`) is a static public page (Facebook "Data deletion instructions URL",
+docs/auth-setup.md 4.1). `public/data-deletion.html` holds the placeholders `__APP_TITLE__`, `__RETENTION_TEXT__`,
+`__SUPPORT_CONTACT_TEXT__`; the entrypoint replaces them in place at start with HTML-escaped values (jq, single pass).
+Under `npm run dev` the placeholders stay visible. `npm run test:entrypoint` checks the entrypoint (escaping, no
+placeholder left, validation); needs `jq`.
+
+## Delete my data
+
+Account menu -> "Delete my data" -> confirmation dialog -> `DELETE /api/me/data` (api-contract 2.8): the in-flight stream
+is aborted first, `503 deletion_incomplete` is repeated after `Retry-After` (5 attempts in total), `204` clears the React
+Query cache, shows the new-chat view and a notice (plus `app.supportContact` when configured). The user stays signed in.
 
 ## E2E mock auth (test-only)
 

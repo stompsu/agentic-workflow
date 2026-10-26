@@ -21,6 +21,8 @@ import {
 import { AuthContext } from '../auth/AuthContext';
 import { render } from '@testing-library/react';
 import type { Message } from '../api/types';
+import { parseConfig } from '../config/config';
+import { buildLoginRequest } from '../auth/msalConfig';
 
 const wfRoute = (items = WORKFLOWS) => ({ 'GET /api/workflows': () => json({ items }) });
 
@@ -363,6 +365,32 @@ describe('LoginPage', () => {
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Continue with Google', 'Continue with Facebook', 'Continue with NewIdp']);
     await user.click(screen.getByRole('button', { name: 'Continue with Facebook' }));
     expect(login).toHaveBeenCalledWith('facebook');
+  });
+
+  it('an entry without domainHint (email, nonprod) calls login() with no hint; the config round-trips it', async () => {
+    const user = userEvent.setup();
+    const login = vi.fn(async () => undefined);
+    const cfg = parseConfig({
+      auth: {
+        clientId: 'c',
+        authority: 'https://x.ciamlogin.com/',
+        apiScopes: ['s'],
+        providers: [
+          { id: 'google', label: 'Continue with Google', domainHint: 'google' },
+          { id: 'email', label: 'Sign in with email' },
+        ],
+      },
+    });
+    expect(cfg.auth.providers[1]).toEqual({ id: 'email', label: 'Sign in with email' });
+    render(
+      <AuthContext.Provider value={fakeAuth({ status: 'anonymous', login })}>
+        <LoginPage providers={cfg.auth.providers} />
+      </AuthContext.Provider>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Sign in with email' }));
+    expect(login).toHaveBeenCalledTimes(1);
+    expect(login).toHaveBeenCalledWith(undefined);
+    expect(buildLoginRequest(['s'], undefined)).toEqual({ scopes: ['s'] });
   });
 
   it('falls back to a generic sign-in (hosted chooser) when no providers are configured, and shows session expiry', async () => {

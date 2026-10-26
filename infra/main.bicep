@@ -48,6 +48,21 @@ param apiScope string
 param searchIndexName string = 'support-knowledge'
 param echoWorkflowEnabled bool = false
 
+// ---- retention, sign-in options, workflow models (plan.md section 3 Phase 5; D6, D7, D8) ---------------------------
+@description('Chat retention in days (D7): backend Chat__RetentionDays, frontend APP_RETENTION_DAYS. User-changeable defaults: dev 30, test 30, prod 90.')
+@minValue(1)
+@maxValue(3650)
+param chatRetentionDays int
+@description('JSON array for the frontend AUTH_PROVIDERS (D6). Nonprod includes the email entry; prod must not. Empty = env var not set.')
+param authProviders string = ''
+@description('Support contact shown in the "Delete my data" notice (APP_SUPPORT_CONTACT, plain text, max 200 chars). Empty = not set.')
+@maxLength(200)
+param supportContact string = ''
+@description('Chat model deployment for the SupportTicket orchestrator (D8, a cheaper model). Empty = env var not set.')
+param orchestratorDeployment string = ''
+@description('Chat model deployment for the Policy, Claims and HealthAssessments specialists (D8). Empty = env vars not set.')
+param specialistDeployment string = ''
+
 // ---- Foundry / models (referenced, never created) ------------------------------------------------------------------
 @description('Resource id of an existing Foundry project. Empty = no "Azure AI User" assignment.')
 param foundryProjectResourceId string = ''
@@ -241,6 +256,7 @@ var baseEnv = [
   { name: 'Search__Endpoint', value: search.outputs.endpoint }
   { name: 'Search__IndexName', value: searchIndexName }
   { name: 'Workflows__Echo__Enabled', value: string(echoWorkflowEnabled) }
+  { name: 'Chat__RetentionDays', value: string(chatRetentionDays) }
   { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'appinsights-connection' }
 ]
 var authModeEnv = [
@@ -249,6 +265,16 @@ var authModeEnv = [
 var foundryEnv = empty(foundryProjectEndpoint) ? [] : [
   { name: 'Foundry__ProjectEndpoint', value: foundryProjectEndpoint }
 ]
+var workflowEnv = concat(
+  empty(orchestratorDeployment) ? [] : [
+    { name: 'Workflows__SupportTicket__Agents__Orchestrator__Deployment', value: orchestratorDeployment }
+  ],
+  empty(specialistDeployment) ? [] : [
+    { name: 'Workflows__SupportTicket__Agents__Policy__Deployment', value: specialistDeployment }
+    { name: 'Workflows__SupportTicket__Agents__Claims__Deployment', value: specialistDeployment }
+    { name: 'Workflows__SupportTicket__Agents__HealthAssessments__Deployment', value: specialistDeployment }
+  ]
+)
 var keyEnv = useKeys ? [
   { name: 'Cosmos__Key', secretRef: 'cosmos-key' }
   { name: 'Search__Key', secretRef: 'search-query-key' }
@@ -275,13 +301,24 @@ module backend 'modules/containerapp.bicep' = {
     maxReplicas: backendMaxReplicas
     concurrentRequests: backendConcurrentRequests
     enableHealthProbes: !backendIsPlaceholder
-    env: concat(baseEnv, authModeEnv, foundryEnv, keyEnv)
+    env: concat(baseEnv, authModeEnv, foundryEnv, workflowEnv, keyEnv)
     secrets: keyVaultSecrets
     inlineSecretName: 'appinsights-connection'
     inlineSecretValue: monitoring.outputs.appInsightsConnectionString
   }
   dependsOn: [ acrPull, secrets ]
 }
+
+var frontendEnv = concat([
+  { name: 'BACKEND_UPSTREAM', value: backend.outputs.fqdn }
+  { name: 'AUTH_CLIENT_ID', value: spaClientId }
+  { name: 'AUTH_AUTHORITY', value: spaAuthority }
+  { name: 'AUTH_API_SCOPE', value: apiScope }
+  { name: 'APP_RETENTION_DAYS', value: string(chatRetentionDays) }
+],
+  empty(authProviders) ? [] : [ { name: 'AUTH_PROVIDERS', value: authProviders } ],
+  empty(supportContact) ? [] : [ { name: 'APP_SUPPORT_CONTACT', value: supportContact } ]
+)
 
 module frontend 'modules/containerapp.bicep' = {
   name: 'frontend'
@@ -298,12 +335,7 @@ module frontend 'modules/containerapp.bicep' = {
     minReplicas: frontendMinReplicas
     maxReplicas: frontendMaxReplicas
     concurrentRequests: frontendConcurrentRequests
-    env: [
-      { name: 'BACKEND_UPSTREAM', value: backend.outputs.fqdn }
-      { name: 'AUTH_CLIENT_ID', value: spaClientId }
-      { name: 'AUTH_AUTHORITY', value: spaAuthority }
-      { name: 'AUTH_API_SCOPE', value: apiScope }
-    ]
+    env: frontendEnv
   }
   dependsOn: [ acrPull ]
 }
@@ -312,7 +344,8 @@ module frontend 'modules/containerapp.bicep' = {
 var smokeEnv = concat(
   filter(baseEnv, e => !contains(e, 'secretRef')),
   [ { name: 'Azure__AuthMode', value: 'ManagedIdentity' } ],
-  foundryEnv
+  foundryEnv,
+  workflowEnv
 )
 module smokeJob 'modules/smoke-job.bicep' = if (isTest && deploySmokeJob && !backendIsPlaceholder) {
   name: 'smoke-job'

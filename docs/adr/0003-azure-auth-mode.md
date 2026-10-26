@@ -2,6 +2,7 @@
 
 Status: Accepted (revised 2026-10-25). Decision D5 (managed identity for Foundry in all deployed environments, no
 service-principal secret) is Decided; `.claude/agents/azure-infra.md` is aligned. Skill: azure-auth-switch.
+2026-10-25: rules 9-10 added (D7 retention / delete-my-data config); D8 resolved (Foundry inputs supplied by the user).
 
 ## Context
 
@@ -36,6 +37,7 @@ config errors before the prod approval:
   `Search__Key`, and the command `--smoke-check`: builds clients through `IAzureClientFactory`, does a Cosmos point
   read of a non-existent id (expects 404, fails on 401/403), one Search query with `top=1`, and acquires a Foundry
   token when `Foundry:ProjectEndpoint` is set (skipped and logged otherwise). Exit code 0/1; no data written.
+  The job gets the same non-secret app settings as the backend app (including `Chat__RetentionDays`, rule 9).
 - devops-pipelines runs the job after the test deploy; prod deployment requires it to pass (before approval).
 
 ### 2. One factory, services never read keys
@@ -92,11 +94,20 @@ Environment names and `AuthMode` values are compared case-insensitively (`String
    registry contains any workflow other than `echo` (the check runs after registration, against `IWorkflowRegistry`).
 8. `Workflows:Echo:Enabled = true` and environment is not in the allow-list `Development`, `Dev`, `Test`
    (so it always fails in `Production`).
+9. `Chat:RetentionDays` is set but not an integer in 1..3650, OR it is unset and the environment is not `Development`
+   (D7: every deployed environment must expire data; defaults dev 30, test 30, prod 90, data-model 1.3).
+10. `Chat:DeleteUserDataBudget` is not a `TimeSpan` in `00:00:05`..`00:03:00` (default `00:01:00`; must stay below the
+    240 s ingress timeout, api-contract 2.8).
+Rules 9-10 run in the API host only (web app and `--smoke-check`), not in the ingestion console app.
 
-Foundry placeholder approach (Phase 1, until D8 is resolved): dev runs with only the echo workflow registered,
-`Foundry:ProjectEndpoint` unset and Bicep param `foundryProjectResourceId` empty (no "Azure AI User" role assignment).
-`ChatClientFactory` is registered but never builds `AIProjectClient` because nothing calls `Create`. Phase 2 sets the
-endpoint and the Bicep param together when SupportTicket is registered; rule 7 then enforces the endpoint.
+Foundry inputs (D8, decided): the user supplies the Foundry project resource id (`foundryProjectResourceId`), the
+project endpoint (`foundryProjectEndpoint` -> `Foundry:ProjectEndpoint`) and the model resource id
+(`modelResourceId`, the account hosting the embedding deployment) per environment; azure-infra references them and
+creates only role assignments. Until the user has supplied them for an environment, that environment runs as before
+(Phase 1 placeholder approach): only the echo workflow registered (dev), `Foundry:ProjectEndpoint` unset, no
+"Azure AI User" role assignment. `ChatClientFactory` is registered but never builds `AIProjectClient` because nothing
+calls `Create`. Once the endpoint and the Bicep param are set together and SupportTicket is registered, rule 7
+enforces the endpoint.
 
 ### 5. Secrets
 - Local: `dotnet user-secrets` for `Cosmos:Key`, `Search:Key` (query key).
@@ -118,13 +129,14 @@ Prod and test (test: for the smoke job, 1a): Cosmos SQL role "Cosmos DB Built-in
 database; "Search Index Data Reader" on the Search service. All deployed envs: "Azure AI User" on the Foundry project,
 created only when the optional Bicep param `foundryProjectResourceId` is set; "AcrPull" on ACR. Ingestion identity
 separately gets "Search Index Data Contributor" (+ "Search Service Contributor" for index management, + Foundry
-access for embeddings).
+access for embeddings). "Delete my data" needs no extra role: Data Contributor already allows deletes.
 
 ## Tests (backend-dotnet)
 - Each factory path builds clients without network calls (Key mode, MI mode with a stub `TokenCredential`).
 - Validation matrix: each rule in 4 has a failing test; `Production + Key` throws; `production` (lowercase) behaves
   like `Production`; echo enabled in `Production` throws; echo-only registry without `Foundry:ProjectEndpoint` starts;
-  any non-echo workflow without it throws.
+  any non-echo workflow without it throws; `Chat:RetentionDays` unset starts in `Development` and throws in `Dev`,
+  `Test`, `Production`; `0`, `3651` and a non-integer throw; budget `00:00:00` and `00:05:00` throw.
 - `ChatClientFactory` constructs `AIProjectClient` only with a `TokenCredential` (type-level: no overload with a key
   exists) and not before the first `Create`.
 - `--smoke-check` returns non-zero when Cosmos or Search reject the credential (stubbed responses).

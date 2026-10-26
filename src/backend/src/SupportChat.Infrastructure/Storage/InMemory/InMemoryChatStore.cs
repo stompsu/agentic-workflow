@@ -8,15 +8,74 @@ namespace SupportChat.Infrastructure.Storage.InMemory;
 /// <summary>
 /// In-memory <see cref="ISessionStore"/> + <see cref="IMessageStore"/> for tests. Enforces userId exactly like the
 /// Cosmos partition key: every lookup is keyed by (userId, sessionId). Never registered by AddInfrastructure.
+/// TTL: like Cosmos, sessions and messages carry <c>ttl</c> (RetentionDays * 86400, omitted when unset), counted from
+/// their last write by the injected TimeProvider; expired documents are invisible (a session that expires leaves its
+/// remaining messages behind as orphans, as in Cosmos).
 /// </summary>
 public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptions? options = null) : ISessionStore, IMessageStore
 {
+    private const int DeleteChunkSize = 100;
+
     private readonly object _gate = new();
     private readonly Dictionary<(string User, string Session), State> _sessions = new();
+    private readonly List<(string User, Stored Message)> _orphans = [];
     private readonly ChatLimitsOptions _options = options ?? new ChatLimitsOptions();
 
     /// <summary>Test hook: runs after DELETE took the lock and before messages are removed (throw to simulate a crash).</summary>
     public Func<Task>? AfterDeleteLocked { get; set; }
+
+    /// <summary>Test hook: called after each session mark and each message chunk of DeleteAllUserDataAsync.</summary>
+    public Action? OnDeleteAllProgress { get; set; }
+
+    /// <summary>Test hook: a message document without a session document (left by an interrupted delete).</summary>
+    public void SeedOrphanMessage(string userId, MessageRecord message)
+    {
+        lock (_gate)
+        {
+            _orphans.Add((userId, NewStored(message)));
+        }
+    }
+
+    /// <summary>Test hook: ttl of the session document (null = property omitted). Throws if the session is gone.</summary>
+    public int? SessionTtl(string userId, string sessionId)
+    {
+        lock (_gate)
+        {
+            Purge();
+            return (Find(userId, sessionId) ?? throw new KeyNotFoundException()).Ttl;
+        }
+    }
+
+    /// <summary>Test hook: ttl of every stored message of the session (null entries = property omitted).</summary>
+    public IReadOnlyList<int?> MessageTtls(string userId, string sessionId)
+    {
+        lock (_gate)
+        {
+            Purge();
+            return Find(userId, sessionId)?.Messages.Select(m => m.Ttl).ToList() ?? [];
+        }
+    }
+
+    /// <summary>Test hook: number of documents (sessions of any state, messages, orphans) the user has.</summary>
+    public int DocumentCount(string userId)
+    {
+        lock (_gate)
+        {
+            Purge();
+            return _sessions.Where(kv => kv.Key.User == userId).Sum(kv => 1 + kv.Value.Messages.Count)
+                   + _orphans.Count(o => o.User == userId);
+        }
+    }
+
+    /// <summary>Test hook: true while the session document exists in state deleting.</summary>
+    public bool IsDeleting(string userId, string sessionId)
+    {
+        lock (_gate)
+        {
+            Purge();
+            return Find(userId, sessionId)?.Deleting == true;
+        }
+    }
 
     public Task<SessionRecord> CreateAsync(string userId, string workflowId, string? title, CancellationToken ct)
     {
@@ -24,6 +83,8 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
         var state = new State { Id = TurnRules.NewId(), WorkflowId = workflowId, Title = title, CreatedAt = now, UpdatedAt = now };
         lock (_gate)
         {
+            Purge();
+            Touch(state, now);
             _sessions[(userId, state.Id)] = state;
             return Task.FromResult(state.ToRecord());
         }
@@ -33,6 +94,7 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
     {
         lock (_gate)
         {
+            Purge();
             return Task.FromResult(Find(userId, sessionId) is { Deleting: false } s ? s.ToRecord() : null);
         }
     }
@@ -52,6 +114,7 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
 
         lock (_gate)
         {
+            Purge();
             var all = _sessions
                 .Where(kv => kv.Key.User == userId && !kv.Value.Deleting)
                 .Select(kv => kv.Value)
@@ -68,6 +131,7 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
     {
         lock (_gate)
         {
+            Purge();
             if (Find(userId, sessionId) is not { } state)
             {
                 return DeleteSessionResult.NotFound;
@@ -84,6 +148,7 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
                 state.Deleting = true;
                 state.ActiveTurnId = TurnRules.NewId();
                 state.ActiveTurnStartedAt = now;
+                Touch(state, now);
             }
         }
 
@@ -100,11 +165,93 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
         return DeleteSessionResult.Deleted;
     }
 
+    public Task<DeleteUserDataResult> DeleteAllUserDataAsync(string userId, TimeSpan budget, CancellationToken ct)
+    {
+        var deadline = timeProvider.GetUtcNow() + budget;
+        bool OutOfBudget() => timeProvider.GetUtcNow() >= deadline;
+
+        // 1. Mark every active session deleting, taking over any lock (live or stale).
+        List<string> sessionIds;
+        lock (_gate)
+        {
+            Purge();
+            sessionIds = _sessions.Where(kv => kv.Key.User == userId).Select(kv => kv.Key.Session).ToList();
+        }
+
+        foreach (var id in sessionIds)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (OutOfBudget())
+            {
+                return Task.FromResult(DeleteUserDataResult.Incomplete);
+            }
+
+            lock (_gate)
+            {
+                Purge();
+                if (Find(userId, id) is { Deleting: false } state)
+                {
+                    var now = timeProvider.GetUtcNow();
+                    state.Deleting = true;
+                    state.ActiveTurnId = TurnRules.NewId();
+                    state.ActiveTurnStartedAt = now;
+                    Touch(state, now);
+                }
+            }
+
+            OnDeleteAllProgress?.Invoke();
+        }
+
+        // 2. Every message of the user (orphans included), in chunks.
+        List<string> messageIds;
+        lock (_gate)
+        {
+            messageIds = _sessions.Where(kv => kv.Key.User == userId).SelectMany(kv => kv.Value.Messages)
+                .Concat(_orphans.Where(o => o.User == userId).Select(o => o.Message))
+                .Select(m => m.Record.Id)
+                .ToList();
+        }
+
+        foreach (var chunk in messageIds.Chunk(DeleteChunkSize))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (OutOfBudget())
+            {
+                return Task.FromResult(DeleteUserDataResult.Incomplete);
+            }
+
+            var ids = chunk.ToHashSet(StringComparer.Ordinal);
+            lock (_gate)
+            {
+                foreach (var kv in _sessions.Where(kv => kv.Key.User == userId))
+                {
+                    kv.Value.Messages.RemoveAll(m => ids.Contains(m.Record.Id));
+                }
+
+                _orphans.RemoveAll(o => o.User == userId && ids.Contains(o.Message.Record.Id));
+            }
+
+            OnDeleteAllProgress?.Invoke();
+        }
+
+        // 3. The session documents listed in step 1.
+        lock (_gate)
+        {
+            foreach (var id in sessionIds)
+            {
+                _sessions.Remove((userId, id));
+            }
+        }
+
+        return Task.FromResult(DeleteUserDataResult.Completed);
+    }
+
     public Task<StartTurnResult> TryStartTurnAsync(string userId, string sessionId, MessageRecord userMessage, CancellationToken ct)
     {
         TurnRules.EnsureUserMessage(sessionId, userMessage);
         lock (_gate)
         {
+            Purge();
             if (Find(userId, sessionId) is not { Deleting: false } state)
             {
                 return Task.FromResult<StartTurnResult>(new StartTurnResult.NotFound());
@@ -122,7 +269,8 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
             state.UpdatedAt = now;
             state.MessageCount++;
             state.Title ??= TurnRules.AutoTitle(userMessage.Content);
-            state.Messages.Add(userMessage);
+            state.Messages.Add(NewStored(userMessage));
+            Touch(state, now);
             return Task.FromResult<StartTurnResult>(new StartTurnResult.Started(lease));
         }
     }
@@ -131,6 +279,7 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
     {
         lock (_gate)
         {
+            Purge();
             if (Find(userId, lease.SessionId) is not { } state)
             {
                 return Task.FromResult(CompleteTurnResult.SessionGone);
@@ -148,12 +297,14 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
                     throw new ArgumentException("The message does not belong to the lease's session.", nameof(assistantMessage));
                 }
 
-                state.Messages.Add(assistantMessage);
+                state.Messages.Add(NewStored(assistantMessage));
                 state.MessageCount++;
             }
 
+            var now = timeProvider.GetUtcNow();
             state.ActiveTurnId = null;
-            state.UpdatedAt = timeProvider.GetUtcNow();
+            state.UpdatedAt = now;
+            Touch(state, now);
             return Task.FromResult(CompleteTurnResult.Completed);
         }
     }
@@ -162,6 +313,7 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
     {
         lock (_gate)
         {
+            Purge();
             if (Find(userId, sessionId) is not { Deleting: false } state)
             {
                 return Task.FromResult<(IReadOnlyList<MessageRecord>, bool)>((Array.Empty<MessageRecord>(), false));
@@ -178,6 +330,7 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
     {
         lock (_gate)
         {
+            Purge();
             if (Find(userId, sessionId) is not { Deleting: false } state)
             {
                 return Task.FromResult<IReadOnlyList<MessageRecord>>(Array.Empty<MessageRecord>());
@@ -193,7 +346,41 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
         _sessions.TryGetValue((userId, sessionId), out var state) ? state : null;
 
     private static List<MessageRecord> Ordered(State state) =>
-        state.Messages.Select((m, i) => (m, i)).OrderBy(x => x.m.CreatedAt).ThenBy(x => x.i).Select(x => x.m).ToList();
+        state.Messages.Select((m, i) => (m, i)).OrderBy(x => x.m.Record.CreatedAt).ThenBy(x => x.i).Select(x => x.m.Record).ToList();
+
+    private int? Ttl() => TurnRules.TtlSeconds(_options.RetentionDays);
+
+    private Stored NewStored(MessageRecord record) => new(record, Ttl(), timeProvider.GetUtcNow());
+
+    /// <summary>Every session write refreshes ttl and the write time (Cosmos counts ttl from the last write).</summary>
+    private void Touch(State state, DateTimeOffset now)
+    {
+        state.Ttl = Ttl();
+        state.LastWrite = now;
+    }
+
+    /// <summary>Removes expired documents (Cosmos hides them immediately). Call under the lock.</summary>
+    private void Purge()
+    {
+        var now = timeProvider.GetUtcNow();
+        foreach (var key in _sessions.Keys.ToList())
+        {
+            var state = _sessions[key];
+            state.Messages.RemoveAll(m => m.Expired(now));
+            if (state.Ttl is { } ttl && now >= state.LastWrite + TimeSpan.FromSeconds(ttl))
+            {
+                _orphans.AddRange(state.Messages.Select(m => (key.User, m)));
+                _sessions.Remove(key);
+            }
+        }
+
+        _orphans.RemoveAll(o => o.Message.Expired(now));
+    }
+
+    private sealed record Stored(MessageRecord Record, int? Ttl, DateTimeOffset WrittenAt)
+    {
+        public bool Expired(DateTimeOffset now) => Ttl is { } ttl && now >= WrittenAt + TimeSpan.FromSeconds(ttl);
+    }
 
     private sealed class State
     {
@@ -215,7 +402,11 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
 
         public DateTimeOffset ActiveTurnStartedAt { get; set; }
 
-        public List<MessageRecord> Messages { get; } = [];
+        public int? Ttl { get; set; }
+
+        public DateTimeOffset LastWrite { get; set; }
+
+        public List<Stored> Messages { get; } = [];
 
         public SessionRecord ToRecord() => new(Id, WorkflowId, Title, CreatedAt, UpdatedAt, MessageCount);
     }

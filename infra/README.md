@@ -51,11 +51,39 @@ CAUTION: re-running the infra deployment with empty image params resets the apps
 real deploy, pass the current images (e.g. `--parameters backendImage=$(az containerapp show ... --query properties.template.containers[0].image -o tsv)`)
 or avoid infra redeploys without them. See open questions in the hand-off report.
 
+## App settings params (retention, sign-in, models)
+
+| Param | Env vars | dev / test / prod |
+|---|---|---|
+| `chatRetentionDays` (int, 1..3650, required) | backend and MI smoke job `Chat__RetentionDays`; frontend `APP_RETENTION_DAYS` | 30 / 30 / 90 (D7; user-changeable defaults) |
+| `authProviders` (JSON string; empty = unset) | frontend `AUTH_PROVIDERS` | Google, Facebook and `{"id":"email","label":"Sign in with email"}` / same / Google and Facebook only (D6) |
+| `supportContact` (plain text, max 200; empty = unset) | frontend `APP_SUPPORT_CONTACT` | empty / empty / `REPLACE_ME` (caught by `check-params.sh`) |
+| `orchestratorDeployment` (empty = unset) | backend and smoke job `Workflows__SupportTicket__Agents__Orchestrator__Deployment` | user input (D8) |
+| `specialistDeployment` (empty = unset) | backend and smoke job `Workflows__SupportTicket__Agents__{Policy,Claims,HealthAssessments}__Deployment` | user input (D8) |
+
+The Cosmos container keeps `defaultTtl -1` (TTL on, no default expiry); the app writes the per-document `ttl`
+(data-model 1.3). Changing `chatRetentionDays` only affects documents written afterwards.
+
+## User-supplied inputs per environment
+
+Set in `params/<env>.bicepparam` (or `--parameters`); nothing here is a secret.
+- Entra: `entraInstance`, `entraTenantId`, `apiClientId`, `spaClientId`, `spaAuthority`, `apiScope` (`docs/auth-setup.md`).
+- Foundry (D8): `foundryProjectResourceId`, `foundryProjectEndpoint`, `modelResourceId`, `embeddingDeployment`
+  (the `text-embedding-3-small` deployment name), `orchestratorDeployment` and `specialistDeployment` (chat deployment names).
+- Real resource names (R1): at least a globally unique `acrName` (dev creates it; test/prod reference it via `acrResourceGroup`).
+- Prod: `supportContact`; review the `chatRetentionDays` defaults in all three files.
+
+Infra is deployed from the user's machine in v1 (D11): create the OIDC identities with `scripts/setup-github-oidc.sh`
+without `--infra-roles`, so the pipeline identities never hold role-assignment rights.
+
 ## Placeholder guard
 Entra params (`entraInstance`, `entraTenantId`, `apiClientId`, `spaClientId`, `spaAuthority`, `apiScope`) have no defaults in
 `main.bicep`. The committed `params/*.bicepparam` hold `REPLACE_ME` / all-zero GUID placeholders so they compile. Bicep
 `assert` is experimental in 0.48 (BCP349) and is not enabled, so `scripts/check-params.sh` greps the param files and exits 1
-on any placeholder. The infra pipeline (Phase 4) must run it before `what-if` / deploy.
+on any placeholder (including prod `supportContact = 'REPLACE_ME'`). The chat deployment params `orchestratorDeployment` and
+`specialistDeployment` are `'REPLACE_ME'` in all three files until filled in (D8), so they are caught too; the script also
+fails if they (or `embeddingDeployment`, when `deployIngestionJob = true`) are set to `''`. The backend additionally rejects
+`<...>`/`REPLACE_ME` deployment names at startup. The infra pipeline (Phase 4) must run it before `what-if` / deploy.
 
 ## Deploy order
 

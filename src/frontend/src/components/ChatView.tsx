@@ -33,6 +33,9 @@ export function ChatView({ sessionId, onSessionCreated, onNewChat }: Props) {
   const finalizeToken = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Unmount (navigation, delete my data): a pending stop-finalize must not refetch afterwards.
+  useEffect(() => () => void (finalizeToken.current += 1), []);
+
   const workflowsQuery = useQuery({ queryKey: queryKeys.workflows, queryFn: ({ signal }) => api.listWorkflows(signal) });
   const workflows = useMemo(() => workflowsQuery.data ?? [], [workflowsQuery.data]);
   const workflowId = chosenWorkflow ?? workflows[0]?.id ?? '';

@@ -40,6 +40,15 @@ public abstract class StoreContract
     /// <summary>Puts an existing session into the 'deleting' state (as a crashed DELETE would leave it).</summary>
     protected abstract Task MarkDeletingAsync(string user, string sessionId);
 
+    /// <summary>Writes a message document without a session document (left by an interrupted delete).</summary>
+    protected abstract Task SeedOrphanAsync(string user, MessageRecord message);
+
+    /// <summary>Number of documents (sessions of any state + messages) in the user's partition.</summary>
+    protected abstract Task<int> CountDocumentsAsync(string user);
+
+    /// <summary>Makes every read of the clock advance it by this amount (used to exhaust a time budget deterministically).</summary>
+    protected abstract void SetAutoAdvance(TimeSpan by);
+
     protected async Task<TurnLease> StartAsync(string user, string sessionId, string text = "hello")
     {
         var result = await Sessions.TryStartTurnAsync(user, sessionId, Msg.User(sessionId, text, Now), default);
@@ -310,5 +319,123 @@ public abstract class StoreContract
 
         var history = await Messages.GetHistoryAsync(UserA, s.Id, "none", 4, default);
         Assert.Equal(["q2", "a2", "q3", "a3"], history.Select(m => m.Content));
+    }
+
+    [Fact]
+    public async Task History_drops_a_leading_assistant_message()
+    {
+        var s = await Sessions.CreateAsync(UserA, "wf", "t", default);
+        for (var i = 0; i < 2; i++)
+        {
+            var lease = await StartAsync(UserA, s.Id, $"q{i}");
+            Advance(TimeSpan.FromMilliseconds(10));
+            await Sessions.CompleteTurnAsync(UserA, lease, Msg.Assistant(s.Id, $"a{i}", Now), default);
+            Advance(TimeSpan.FromMilliseconds(10));
+        }
+
+        // The window of 3 starts with a0 (its user message q0 is outside the window): it must be dropped.
+        var history = await Messages.GetHistoryAsync(UserA, s.Id, "none", 3, default);
+        Assert.Equal(["q1", "a1"], history.Select(m => m.Content));
+    }
+
+    [Fact]
+    public async Task DeleteAll_for_a_user_without_data_completes_and_can_be_repeated()
+    {
+        for (var i = 0; i < 2; i++)
+        {
+            Assert.Equal(DeleteUserDataResult.Completed, await Sessions.DeleteAllUserDataAsync(UserA, TimeSpan.FromMinutes(1), default));
+        }
+    }
+
+    [Fact]
+    public async Task DeleteAll_removes_every_session_message_and_orphan_of_the_caller_and_nothing_of_others()
+    {
+        var live = await Sessions.CreateAsync(UserA, "wf", "live", default);
+        await StartAsync(UserA, live.Id, "in flight"); // live lock, never completed
+        var done = await Sessions.CreateAsync(UserA, "wf", "done", default);
+        var lease = await StartAsync(UserA, done.Id, "q");
+        await Sessions.CompleteTurnAsync(UserA, lease, Msg.Assistant(done.Id, "a", Now), default);
+        var marked = await Sessions.CreateAsync(UserA, "wf", "marked", default);
+        await MarkDeletingAsync(UserA, marked.Id);
+        await SeedOrphanAsync(UserA, Msg.User(Guid.NewGuid().ToString(), "orphan", Now));
+
+        var b = await Sessions.CreateAsync(UserB, "wf", "B's chat", default);
+        var bLease = await StartAsync(UserB, b.Id, "B question");
+        await Sessions.CompleteTurnAsync(UserB, bLease, Msg.Assistant(b.Id, "B answer", Now), default);
+        var bBefore = await CountDocumentsAsync(UserB);
+        Assert.Equal(3, bBefore);
+
+        Assert.Equal(DeleteUserDataResult.Completed, await Sessions.DeleteAllUserDataAsync(UserA, TimeSpan.FromMinutes(1), default));
+
+        Assert.Equal(0, await CountDocumentsAsync(UserA));
+        Assert.Null(await Sessions.GetAsync(UserA, live.Id, default));
+        Assert.Empty((await Sessions.ListAsync(UserA, 10, null, default)).Items);
+        Assert.Equal(bBefore, await CountDocumentsAsync(UserB));
+        Assert.Equal(2, (await Messages.GetRecentAsync(UserB, b.Id, 100, default)).Items.Count);
+
+        // Idempotent.
+        Assert.Equal(DeleteUserDataResult.Completed, await Sessions.DeleteAllUserDataAsync(UserA, TimeSpan.FromMinutes(1), default));
+        Assert.Equal(bBefore, await CountDocumentsAsync(UserB));
+    }
+
+    [Fact]
+    public async Task DeleteAll_takes_over_a_live_lock_and_the_old_lease_can_no_longer_write()
+    {
+        var s = await Sessions.CreateAsync(UserA, "wf", "t", default);
+        var lease = await StartAsync(UserA, s.Id);
+
+        Assert.Equal(DeleteUserDataResult.Completed, await Sessions.DeleteAllUserDataAsync(UserA, TimeSpan.FromMinutes(1), default));
+
+        Assert.Equal(CompleteTurnResult.SessionGone,
+            await Sessions.CompleteTurnAsync(UserA, lease, Msg.Assistant(s.Id, "late", Now), default));
+        Assert.Equal(0, await CountDocumentsAsync(UserA));
+    }
+
+    [Fact]
+    public async Task DeleteAll_with_an_exhausted_budget_is_Incomplete_and_a_later_call_resumes_to_Completed()
+    {
+        var ids = new List<string>();
+        for (var i = 0; i < 3; i++)
+        {
+            var s = await Sessions.CreateAsync(UserA, "wf", $"s{i}", default);
+            ids.Add(s.Id);
+            var lease = await StartAsync(UserA, s.Id, "q");
+            await Sessions.CompleteTurnAsync(UserA, lease, Msg.Assistant(s.Id, "a", Now), default);
+        }
+
+        Assert.Equal(DeleteUserDataResult.Incomplete, await Sessions.DeleteAllUserDataAsync(UserA, TimeSpan.Zero, default));
+        Assert.Equal(9, await CountDocumentsAsync(UserA)); // nothing happened with a zero budget
+
+        // Every clock read costs one second: a 2 s budget runs out part-way (progress is kept).
+        SetAutoAdvance(TimeSpan.FromSeconds(1));
+        Assert.Equal(DeleteUserDataResult.Incomplete, await Sessions.DeleteAllUserDataAsync(UserA, TimeSpan.FromSeconds(2), default));
+        SetAutoAdvance(TimeSpan.Zero);
+
+        Assert.Equal(DeleteUserDataResult.Completed, await Sessions.DeleteAllUserDataAsync(UserA, TimeSpan.FromMinutes(1), default));
+        Assert.Equal(0, await CountDocumentsAsync(UserA));
+    }
+
+    [Fact]
+    public async Task DeleteAll_resumes_a_session_already_in_deleting_and_marked_sessions_stay_invisible()
+    {
+        var s = await Sessions.CreateAsync(UserA, "wf", "t", default);
+        var lease = await StartAsync(UserA, s.Id);
+        await Sessions.CompleteTurnAsync(UserA, lease, Msg.Assistant(s.Id, "a", Now), default);
+        await MarkDeletingAsync(UserA, s.Id);
+
+        Assert.Null(await Sessions.GetAsync(UserA, s.Id, default));
+        Assert.IsType<StartTurnResult.NotFound>(await Sessions.TryStartTurnAsync(UserA, s.Id, Msg.User(s.Id, "x", Now), default));
+        Assert.Equal(DeleteUserDataResult.Completed, await Sessions.DeleteAllUserDataAsync(UserA, TimeSpan.FromMinutes(1), default));
+        Assert.Equal(0, await CountDocumentsAsync(UserA));
+    }
+
+    [Fact]
+    public async Task DeleteAll_with_a_cancelled_token_throws_OperationCanceled()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        await Sessions.CreateAsync(UserA, "wf", "t", default);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => Sessions.DeleteAllUserDataAsync(UserA, TimeSpan.FromMinutes(1), cts.Token));
     }
 }

@@ -37,7 +37,9 @@ internal static partial class TurnRules
 
     /// <summary>
     /// History steps 1-3 (data-model 1.6) on messages sorted ascending: pairing filter, citation marker stripping.
-    /// Assistant: kept only if complete. User: kept only if the next message is a kept assistant message.
+    /// Assistant: kept only if complete AND directly preceded by a user message (a leading assistant message, whose
+    /// user message expired by TTL or fell outside the window, is dropped). User: kept only if the next message is a
+    /// kept assistant message.
     /// </summary>
     public static IReadOnlyList<MessageRecord> ApplyHistoryRules(IReadOnlyList<MessageRecord> ascending)
     {
@@ -47,7 +49,7 @@ internal static partial class TurnRules
             var message = ascending[i];
             if (message.Role == ChatRole.Assistant)
             {
-                if (message.Status == MessageStatus.Complete)
+                if (message.Status == MessageStatus.Complete && i > 0 && ascending[i - 1].Role == ChatRole.User)
                 {
                     result.Add(message with { Content = CitationMarker().Replace(message.Content, string.Empty) });
                 }

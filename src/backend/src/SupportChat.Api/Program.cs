@@ -70,6 +70,7 @@ app.MapHealthEndpoints();
 var api = app.MapGroup("/api").RequireAuthorization(AuthExtensions.ChatUserPolicy);
 api.MapWorkflowEndpoints();
 api.MapSessionEndpoints();
+api.MapMeEndpoints();
 api.MapChatEndpoints();
 
 app.Run();

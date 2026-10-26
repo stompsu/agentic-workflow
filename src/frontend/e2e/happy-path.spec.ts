@@ -22,7 +22,9 @@ test('login -> pick workflow -> send -> streamed answer with citation -> appears
   let created = false;
   const authHeaders: (string | undefined)[] = [];
 
-  await page.route('**/api/**', async (route) => {
+  // Match only the backend's /api/ prefix. A glob like '**/api/**' would also hijack Vite's dev-server module
+  // requests (/src/api/client.ts, ...) and 404 the app's own source files.
+  await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
     const req = route.request();
     const url = new URL(req.url());
     const key = `${req.method()} ${url.pathname}`;
@@ -84,7 +86,7 @@ test('login -> pick workflow -> send -> streamed answer with citation -> appears
   await expect(select.getByRole('option')).toHaveText(['Support ticket', 'Echo (test)']);
   await select.selectOption('support-ticket');
 
-  await page.getByLabel('Message').fill('How long does a claim take?');
+  await page.getByRole('textbox', { name: 'Message' }).fill('How long does a claim take?');
   await page.getByRole('button', { name: 'Send' }).click();
 
   // Streamed answer with agent badge and linked citation

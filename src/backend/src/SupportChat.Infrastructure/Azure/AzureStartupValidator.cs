@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -13,6 +14,10 @@ namespace SupportChat.Infrastructure.Azure;
 public static class AzureStartupValidator
 {
     public const string EchoWorkflowId = "echo";
+    public const int MinRetentionDays = 1;
+    public const int MaxRetentionDays = 3650;
+    public static readonly TimeSpan MinDeleteBudget = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan MaxDeleteBudget = TimeSpan.FromMinutes(3);
 
     private static readonly string[] NonProductionEnvironments = ["Development", "Dev", "Test"];
 
@@ -116,6 +121,30 @@ public static class AzureStartupValidator
             failures.Add("Workflows:Echo:Enabled=true is allowed only in Development, Dev and Test.");
         }
 
+        // Rule 9 (D7): retention is required outside Development; when set it must be an integer in 1..3650.
+        var retentionRaw = configuration["Chat:RetentionDays"];
+        if (string.IsNullOrWhiteSpace(retentionRaw))
+        {
+            if (!isDevelopment)
+            {
+                failures.Add("Chat:RetentionDays is required outside Development (integer 1..3650).");
+            }
+        }
+        else if (!int.TryParse(retentionRaw.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var days)
+                 || days is < MinRetentionDays or > MaxRetentionDays)
+        {
+            failures.Add($"Chat:RetentionDays must be an integer between {MinRetentionDays} and {MaxRetentionDays}.");
+        }
+
+        // Rule 10 (D7): delete-my-data budget stays below the 240 s ingress timeout.
+        var budgetRaw = configuration["Chat:DeleteUserDataBudget"];
+        if (!string.IsNullOrWhiteSpace(budgetRaw)
+            && (!TimeSpan.TryParse(budgetRaw.Trim(), CultureInfo.InvariantCulture, out var budget)
+                || budget < MinDeleteBudget || budget > MaxDeleteBudget))
+        {
+            failures.Add("Chat:DeleteUserDataBudget must be a time span between 00:00:05 and 00:03:00.");
+        }
+
         return failures;
     }
 
@@ -146,7 +175,7 @@ public static class AzureStartupValidator
     }
 
     private static bool IsRealGuid(string? value) =>
-        Guid.TryParse(value?.Trim(), out var guid) && guid != Guid.Empty && !HasPlaceholder(value);
+        Guid.TryParse(value?.Trim(), out var guid) && guid != Guid.Empty && !ConfigPlaceholders.HasPlaceholder(value);
 
     /// <summary>
     /// Absolute https URI with no placeholder markers. Localhost is accepted only when <paramref name="allowLocalhost"/>
@@ -154,7 +183,7 @@ public static class AzureStartupValidator
     /// </summary>
     private static bool IsRealHttpsUri(string? value, bool allowLocalhost)
     {
-        if (string.IsNullOrWhiteSpace(value) || HasPlaceholder(value)
+        if (string.IsNullOrWhiteSpace(value) || ConfigPlaceholders.HasPlaceholder(value)
             || !Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
         {
             return false;
@@ -162,10 +191,6 @@ public static class AzureStartupValidator
 
         return allowLocalhost || !uri.IsLoopback;
     }
-
-    private static bool HasPlaceholder(string? value) =>
-        value is not null
-        && (value.Contains("REPLACE_ME", StringComparison.OrdinalIgnoreCase) || value.Contains('<') || value.Contains('>'));
 
     private static bool Is(string actual, string expected) => string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
 }

@@ -21,6 +21,29 @@ public class IngestionStartupValidatorTests
     }
 
     [Theory]
+    [InlineData("<embedding-deployment>")]
+    [InlineData("REPLACE_ME")]
+    [InlineData("replace_me-x")]
+    public void Placeholder_deployments_are_rejected(string value)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Azure:AuthMode"] = "ManagedIdentity",
+            ["Search:Endpoint"] = "https://search.example.net",
+            ["Foundry:ProjectEndpoint"] = "https://foundry.example.net/api/projects/p",
+            ["Ingestion:VectorizerResourceUri"] = "https://foundry.example.net",
+        }).Build();
+
+        var embedding = IngestionStartupValidator.Validate(
+            configuration, "Production", new IngestionOptions { EmbeddingDeployment = value }, out _);
+        Assert.Contains(embedding, f => f.StartsWith("Ingestion:EmbeddingDeployment") && !f.Contains(value));
+
+        var vectorizer = IngestionStartupValidator.Validate(
+            configuration, "Production", new IngestionOptions { EmbeddingDeployment = "embed", VectorizerDeployment = value }, out _);
+        Assert.Contains(vectorizer, f => f.StartsWith("Ingestion:VectorizerDeployment") && !f.Contains(value));
+    }
+
+    [Theory]
     [InlineData("Staging")]
     [InlineData("Production")]
     [InlineData("production")]

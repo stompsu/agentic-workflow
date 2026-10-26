@@ -112,3 +112,10 @@ body { background: var(--bg); color: var(--text); }
   .history { display: none; position: absolute; top: 3rem; bottom: 0; left: 0; z-index: 5; width: 85%; }
   .history-open { display: block; }
 }
+
+.account { position: relative; }
+.account-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem; white-space: nowrap; }
+.modal-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 45%); display: flex; align-items: center; justify-content: center; z-index: 20; padding: 1rem; }
+.modal { background: var(--panel); color: var(--text); border-radius: 10px; padding: 1.5rem; max-width: 30rem; width: 100%; }
+.modal h2 { margin-top: 0; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }

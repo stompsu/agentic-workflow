@@ -10,6 +10,8 @@ interface Props {
   onSelect: (id: string) => void;
   onNewChat: () => void;
   onDeleted: (id: string) => void;
+  /** Shown as retention info when configured. */
+  retentionDays?: number;
 }
 
 const PAGE_SIZE = 20;
@@ -19,7 +21,7 @@ function formatDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export function Sidebar({ activeSessionId, onSelect, onNewChat, onDeleted }: Props) {
+export function Sidebar({ activeSessionId, onSelect, onNewChat, onDeleted, retentionDays }: Props) {
   const api = useApi();
   const qc = useQueryClient();
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -105,6 +107,7 @@ export function Sidebar({ activeSessionId, onSelect, onNewChat, onDeleted }: Pro
           {query.isFetchingNextPage ? 'Loading...' : 'Load more'}
         </button>
       )}
+      {retentionDays !== undefined && <p className="hint">Chats are kept for {retentionDays} days after last activity.</p>}
     </nav>
   );
 }

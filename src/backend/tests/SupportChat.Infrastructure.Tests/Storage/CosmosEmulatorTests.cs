@@ -142,6 +142,39 @@ public class CosmosStoreEmulatorTests : IClassFixture<CosmosEmulatorFixture>
 
         protected override void Advance(TimeSpan by) => _time.Advance(by);
 
+        protected override async Task SeedOrphanAsync(string user, MessageRecord message) =>
+            await _container.CreateItemAsync(MessageDoc.From(user, message, null), new PartitionKey(user));
+
+        protected override async Task<int> CountDocumentsAsync(string user)
+        {
+            var query = new QueryDefinition("SELECT VALUE COUNT(1) FROM c WHERE c.userId = @userId").WithParameter("@userId", user);
+            using var iterator = _container.GetItemQueryIterator<int>(
+                query, requestOptions: new QueryRequestOptions { PartitionKey = new PartitionKey(user) });
+            var total = 0;
+            while (iterator.HasMoreResults)
+            {
+                total += (await iterator.ReadNextAsync()).Sum();
+            }
+
+            return total;
+        }
+
+        protected override void SetAutoAdvance(TimeSpan by) => _time.AutoAdvanceAmount = by;
+
+        public Task HistoryLeadingAsync() => History_drops_a_leading_assistant_message();
+
+        public Task DeleteAllEmptyAsync() => DeleteAll_for_a_user_without_data_completes_and_can_be_repeated();
+
+        public Task DeleteAllScopedAsync() => DeleteAll_removes_every_session_message_and_orphan_of_the_caller_and_nothing_of_others();
+
+        public Task DeleteAllTakeoverAsync() => DeleteAll_takes_over_a_live_lock_and_the_old_lease_can_no_longer_write();
+
+        public Task DeleteAllBudgetAsync() => DeleteAll_with_an_exhausted_budget_is_Incomplete_and_a_later_call_resumes_to_Completed();
+
+        public Task DeleteAllResumeAsync() => DeleteAll_resumes_a_session_already_in_deleting_and_marked_sessions_stay_invisible();
+
+        public Task DeleteAllCancelAsync() => DeleteAll_with_a_cancelled_token_throws_OperationCanceled();
+
         protected override async Task MarkDeletingAsync(string user, string sessionId)
         {
             var pk = new PartitionKey(user);
@@ -199,6 +232,81 @@ public class CosmosStoreEmulatorTests : IClassFixture<CosmosEmulatorFixture>
 
     [EmulatorFact]
     public Task Messages_of_unknown_session_are_empty() => new Contract(_fixture.Container!).UnknownMessagesAsync();
+
+    [EmulatorFact]
+    public Task History_drops_a_leading_assistant() => new Contract(_fixture.Container!).HistoryLeadingAsync();
+
+    [EmulatorFact]
+    public Task DeleteAll_without_data() => new Contract(_fixture.Container!).DeleteAllEmptyAsync();
+
+    [EmulatorFact]
+    public Task DeleteAll_is_scoped_to_the_caller_and_removes_orphans() => new Contract(_fixture.Container!).DeleteAllScopedAsync();
+
+    [EmulatorFact]
+    public Task DeleteAll_takes_over_live_lock() => new Contract(_fixture.Container!).DeleteAllTakeoverAsync();
+
+    [EmulatorFact]
+    public Task DeleteAll_budget_then_resume() => new Contract(_fixture.Container!).DeleteAllBudgetAsync();
+
+    [EmulatorFact]
+    public Task DeleteAll_resumes_deleting_sessions() => new Contract(_fixture.Container!).DeleteAllResumeAsync();
+
+    [EmulatorFact]
+    public Task DeleteAll_honours_cancellation() => new Contract(_fixture.Container!).DeleteAllCancelAsync();
+
+    [EmulatorFact]
+    public async Task Ttl_is_written_on_every_write_path_and_omitted_when_unset()
+    {
+        foreach (int? days in new int?[] { 30, null })
+        {
+            var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
+            var chat = new CosmosChatContainer(_fixture.Container!);
+            var store = new CosmosSessionStore(chat, Options.Create(new ChatLimitsOptions { RetentionDays = days }), time);
+            var user = Guid.NewGuid().ToString();
+            var pk = new PartitionKey(user);
+            var expected = days is null ? null : (int?)(days * 86400);
+
+            async Task<System.Text.Json.Nodes.JsonObject> RawAsync(string id)
+            {
+                using var stream = (await _fixture.Container!.ReadItemStreamAsync(id, pk)).Content;
+                return System.Text.Json.Nodes.JsonNode.Parse(stream)!.AsObject();
+            }
+
+            void AssertTtl(System.Text.Json.Nodes.JsonObject doc)
+            {
+                if (expected is null)
+                {
+                    Assert.False(doc.ContainsKey("ttl"));
+                }
+                else
+                {
+                    Assert.Equal(expected, doc["ttl"]!.GetValue<int>());
+                }
+            }
+
+            var s = await store.CreateAsync(user, "wf", "t", default);
+            AssertTtl(await RawAsync(s.Id));
+            var userMsg = Msg.User(s.Id, "q", time.GetUtcNow());
+            var lease = Assert.IsType<StartTurnResult.Started>(await store.TryStartTurnAsync(user, s.Id, userMsg, default)).Lease;
+            AssertTtl(await RawAsync(s.Id));
+            AssertTtl(await RawAsync(userMsg.Id));
+            var assistant = Msg.Assistant(s.Id, "a", time.GetUtcNow());
+            await store.CompleteTurnAsync(user, lease, assistant, default);
+            AssertTtl(await RawAsync(s.Id));
+            AssertTtl(await RawAsync(assistant.Id));
+
+            var d = await store.CreateAsync(user, "wf", "d", default);
+            Assert.Equal(DeleteSessionResult.Deleted, await store.DeleteAsync(user, d.Id, default));
+            Assert.Equal(DeleteUserDataResult.Completed, await store.DeleteAllUserDataAsync(user, TimeSpan.FromMinutes(1), default));
+        }
+    }
+
+    [EmulatorFact]
+    public async Task Container_has_ttl_enabled_with_default_minus_one()
+    {
+        var properties = (await _fixture.Container!.ReadContainerAsync()).Resource;
+        Assert.Equal(-1, properties.DefaultTimeToLive);
+    }
 
     [EmulatorFact]
     public Task Messages_of_foreign_session_are_empty() => new Contract(_fixture.Container!).ForeignMessagesAsync();

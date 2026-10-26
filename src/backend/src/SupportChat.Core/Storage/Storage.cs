@@ -71,6 +71,13 @@ public enum DeleteSessionResult
     Busy,
 }
 
+/// <summary>Completed -> 204; Incomplete (time budget ran out, progress kept) -> 503 deletion_incomplete.</summary>
+public enum DeleteUserDataResult
+{
+    Completed,
+    Incomplete,
+}
+
 /// <summary>Thrown by <see cref="ISessionStore.ListAsync"/> when the opaque continuation token is invalid (-> 400).</summary>
 public sealed class InvalidContinuationTokenException : Exception
 {
@@ -97,6 +104,13 @@ public interface ISessionStore
 
     /// <summary>Lock-then-delete sequence (data-model 1.5). Resumes a session already in state deleting.</summary>
     Task<DeleteSessionResult> DeleteAsync(string userId, string sessionId, CancellationToken ct);
+
+    /// <summary>
+    /// Deletes every session and message document of the user (data-model 1.7): marks all sessions deleting (taking
+    /// over live locks), deletes all messages in chunks (orphans included), then the session documents. Resumable and
+    /// idempotent. Returns Incomplete when <paramref name="budget"/> ran out; throws OperationCanceledException on abort.
+    /// </summary>
+    Task<DeleteUserDataResult> DeleteAllUserDataAsync(string userId, TimeSpan budget, CancellationToken ct);
 
     /// <summary>Persists the user message, sets the lock, sets title from the message if null (one batch).</summary>
     Task<StartTurnResult> TryStartTurnAsync(string userId, string sessionId, MessageRecord userMessage, CancellationToken ct);

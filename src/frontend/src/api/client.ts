@@ -15,6 +15,7 @@ export interface ApiClientOptions {
 }
 
 export const TURN_IN_PROGRESS_RETRY_MS = 1000;
+export const DELETE_MY_DATA_MAX_ATTEMPTS = 5;
 
 export function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -117,6 +118,32 @@ export class ApiClient {
   async deleteSession(sessionId: string): Promise<void> {
     const response = await this.authedFetch(`/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
     if (!response.ok) throw await errorFromResponse(response);
+  }
+
+  /** One DELETE /api/me/data attempt (api-contract 2.8). 204 resolves; 503 deletion_incomplete throws ApiError with retryAfterSeconds. */
+  async deleteMyData(signal?: AbortSignal): Promise<void> {
+    const response = await this.authedFetch('/me/data', { method: 'DELETE', ...(signal && { signal }) });
+    if (!response.ok) throw await errorFromResponse(response);
+    await response.body?.cancel().catch(() => undefined);
+  }
+
+  /**
+   * Repeats DELETE /api/me/data after `Retry-After` while the server answers 503 deletion_incomplete, at most
+   * DELETE_MY_DATA_MAX_ATTEMPTS attempts in total. Returns 'deleted' (204) or 'incomplete' (gave up).
+   * Any other error is thrown (ApiError).
+   */
+  async deleteMyDataWithRetry(signal?: AbortSignal): Promise<'deleted' | 'incomplete'> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.deleteMyData(signal);
+        return 'deleted';
+      } catch (e) {
+        if (!(e instanceof ApiError && e.code === 'deletion_incomplete')) throw e;
+        if (attempt >= DELETE_MY_DATA_MAX_ATTEMPTS) return 'incomplete';
+        const seconds = Math.min(Math.max(e.retryAfterSeconds ?? 1, 1), 30);
+        await this.sleep(seconds * 1000, signal);
+      }
+    }
   }
 
   private async openMessageStream(sessionId: string, content: string, signal?: AbortSignal): Promise<Response> {

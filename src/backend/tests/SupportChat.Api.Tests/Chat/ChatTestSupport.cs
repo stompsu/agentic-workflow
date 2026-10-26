@@ -107,6 +107,9 @@ public sealed class ControlledStore(InMemoryChatStore inner) : ISessionStore, IM
     public Task<DeleteSessionResult> DeleteAsync(string userId, string sessionId, CancellationToken ct) =>
         inner.DeleteAsync(userId, sessionId, ct);
 
+    public Task<DeleteUserDataResult> DeleteAllUserDataAsync(string userId, TimeSpan budget, CancellationToken ct) =>
+        inner.DeleteAllUserDataAsync(userId, budget, ct);
+
     public Task<StartTurnResult> TryStartTurnAsync(string userId, string sessionId, MessageRecord userMessage, CancellationToken ct) =>
         inner.TryStartTurnAsync(userId, sessionId, userMessage, ct);
 

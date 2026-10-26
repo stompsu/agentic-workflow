@@ -25,6 +25,16 @@ APPLY=false
 
 usage() { sed -n '2,8p' "$0"; exit "${1:-0}"; }
 
+# Resource group for an environment name (explicit lookup instead of indirect expansion; empty if unknown).
+rg_for() {
+  case "$1" in
+    dev) printf '%s' "$RG_dev" ;;
+    test) printf '%s' "$RG_test" ;;
+    prod) printf '%s' "$RG_prod" ;;
+    *) printf '' ;;
+  esac
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --org) ORG="$2"; shift 2 ;;
@@ -45,8 +55,7 @@ done
 
 [ -n "$ORG" ] && [ -n "$REPO" ] && [ -n "$ACR" ] && [ -n "$ACR_RG" ] || { echo "Missing --org/--repo/--acr/--acr-rg" >&2; usage 1; }
 for e in $ENVS; do
-  rgvar="RG_$e"
-  [ -n "${!rgvar:-}" ] || { echo "Missing --rg-$e (or unknown environment)" >&2; exit 1; }
+  [ -n "$(rg_for "$e")" ] || { echo "Missing --rg-$e (or unknown environment)" >&2; exit 1; }
 done
 
 if $APPLY; then echo "MODE: APPLY (commands will be executed)"; else echo "MODE: DRY-RUN (nothing is executed; pass --apply to run)"; fi
@@ -67,7 +76,7 @@ fi
 ACR_ID=$(capture "<acr-resource-id>" az acr show -n "$ACR" -g "$ACR_RG" --query id -o tsv)
 
 for ENV in $ENVS; do
-  rgvar="RG_$ENV"; RG="${!rgvar}"
+  RG="$(rg_for "$ENV")"
   ID_NAME="id-github-$ENV"
   echo
   echo "=== Environment: $ENV (resource group $RG) ==="

@@ -1,6 +1,8 @@
 # API contract (source of truth)
 
-Status: v1 (Phase 0, revised 2026-10-25 after the second qa-reviewer pass). Change this file FIRST, then backend and frontend.
+Status: v1 (Phase 0, revised 2026-10-25 after the second qa-reviewer pass; D7 additions 2026-10-25: `DELETE /api/me/data`,
+503 `deletion_incomplete`, retention notes). All D7 additions are additive (no version bump).
+Change this file FIRST, then backend and frontend.
 Owners: architect (contract), backend-dotnet (server), frontend-react (client), qa-reviewer (compliance).
 
 ## 1. General rules
@@ -17,6 +19,9 @@ Owners: architect (contract), backend-dotnet (server), frontend-react (client), 
 - The user is ALWAYS the `oid` claim of the validated token. No endpoint accepts a user id in the route, query or body.
   No response contains `userId`, `ttl`, `activeTurn`, `state` or `workflowMetadata`.
 - Workflow-agnostic: no endpoint, field or event is specific to a workflow type. Workflows are data (`GET /api/workflows`).
+- Retention: chat data expires automatically (`Chat:RetentionDays`, data-model 1.3). The API exposes no retention
+  value or expiry time; clients must tolerate sessions disappearing from the list and old messages disappearing from
+  a session (2.5).
 
 ## 2. Endpoints
 
@@ -30,6 +35,7 @@ Owners: architect (contract), backend-dotnet (server), frontend-react (client), 
 | GET | `/api/sessions/{sessionId}` | user | 200 | Session + most recent messages. |
 | POST | `/api/sessions/{sessionId}/messages` | user | 200 `text/event-stream` | Send a user message, stream the assistant turn (SSE). |
 | DELETE | `/api/sessions/{sessionId}` | user | 204 | Hard-delete session and all its messages. |
+| DELETE | `/api/me/data` | user | 204 | Delete ALL chat data (every session and message) of the caller. Idempotent. Section 2.8. |
 
 `/api/healthz` is the pipeline smoke-test target (`https://<frontend fqdn>/api/healthz`). Health responses:
 `{"status":"ok"}` or `{"status":"unavailable"}` (503). They never include config, dependency versions or errors.
@@ -82,6 +88,7 @@ Response `201`, header `Location: /api/sessions/{id}`:
 
 - `pageSize` 1..50, default 20. `continuationToken` opaque string from the previous page (base64url); never parse it.
 - Only sessions of the current user. Ordered by `updatedAt` desc. Sessions being deleted are omitted.
+- Expired sessions (no activity for `Chat:RetentionDays`) are omitted; they are gone for good.
 
 ```json
 200
@@ -126,7 +133,11 @@ Message fields:
 
 A user message whose turn failed or was cancelled stays visible (it may have no assistant reply).
 Older-message paging is out of scope for v1 (`hasMoreMessages` signals it; a paging parameter can be added later).
-A session being deleted returns 404.
+A session being deleted returns 404. An expired session returns 404.
+Retention: each message expires `Chat:RetentionDays` after it was written, while the session lives until
+`Chat:RetentionDays` after its last activity (data-model 1.3). A session used over a period longer than the retention
+period therefore loses its oldest messages first. Clients must render whatever is returned, including a list whose
+first message is an `assistant` message, and an empty `messages` array.
 
 ### 2.6 POST /api/sessions/{sessionId}/messages (SSE)
 
@@ -137,7 +148,7 @@ Request headers: `Authorization`, `Content-Type: application/json`, `Accept: tex
 - `content` required, 1..4000 chars after trim (`Chat:MaxMessageChars`). Request body limit 32 KB.
 - All validation happens BEFORE the response starts. Failures return ProblemDetails (section 5), never SSE.
 - At most one active turn per session: a concurrent POST returns 409 `turn_in_progress`. A session being deleted
-  returns 404 `not_found`.
+  (including by `DELETE /api/me/data`) returns 404 `not_found`.
 - If the turn was accepted (user message persisted, lock taken) but a failure occurs before the `session` event is
   written, the response is 500 ProblemDetails `internal_error`; the server releases the lock and the user message
   stays visible without a reply.
@@ -171,14 +182,80 @@ Server sequence (data-model 1.5):
 If the request fails after step 1 (500), the session stays invisible; repeating the DELETE resumes steps 2-3 and
 returns 204. Once step 3 completed, DELETE returns 404.
 
+### 2.8 DELETE /api/me/data (delete my data)
+
+Deletes ALL chat data of the caller: every session document (any state) and every message document in the caller's
+partition (`oid`), including orphaned messages left by an interrupted session delete. It does NOT delete the Entra
+External ID user account; that is a separate manual admin step (/docs/auth-setup.md section 9).
+
+Request:
+- `DELETE /api/me/data`, no query parameters, no body (a body, if sent, is ignored; no `Content-Type` required).
+- Auth exactly like every other endpoint: bearer token with scope `access_as_user` and an `oid` claim
+  (401 `unauthorized` / 403 `forbidden`, section 3). The data deleted is ALWAYS the token's `oid` partition; `me` is
+  not an id and no other user can be addressed.
+
+Responses:
+
+| status | body | Meaning |
+|---|---|---|
+| 204 | none | Everything of the caller that existed when the request started is deleted. Also returned when there was nothing to delete. Repeating the call returns 204 again (idempotent). |
+| 503 | ProblemDetails `code: deletion_incomplete`, header `Retry-After: 1` | The server time budget (`Chat:DeleteUserDataBudget`, default `00:01:00`) ran out before everything was deleted. Progress is kept: sessions already marked stay invisible, deleted documents stay deleted; some data may still be visible until the request is repeated. The client repeats the same request. |
+| 401 / 403 | ProblemDetails `unauthorized` / `forbidden` | Section 3. |
+| 500 | ProblemDetails `internal_error` | Unexpected failure. Progress is kept; repeating the request resumes. |
+
+Never 404 (a caller with no data gets 204) and never 409.
+
+Decision: synchronous 204 (not 202). Reasons: per-user data is small (single logical partition, at most a few
+thousand documents; about 100-document chunks complete in well under the budget), the call stays stateless (no job
+record, no status endpoint, no worker), and the client gets a definite "done". The deletion is resumable without
+server-side job state: sessions are first marked `deleting` (persisted in their own documents), so a request that hit
+the budget, failed, or was aborted by the client is simply repeated and continues where the previous one stopped.
+The budget (60 s) keeps the request far below the 240 s Container Apps ingress timeout and nginx
+`proxy_read_timeout 300s`. Rejected: 202 + polling (needs deletion state and a status endpoint); Cosmos
+"delete items by partition key" (still preview, asynchronous, needs an account capability).
+
+In-flight turns do not block (no 409): the deletion takes over every session's turn lock, live or stale. Reason: the
+user's intent is erasure, and a stream in another tab must not make it fail.
+- A turn streaming at that moment loses its lease: at turn end it persists nothing (no assistant message) and, if its
+  stream is still open, ends with `error internal_error` (section 4.5). Its user message is deleted with the rest.
+- A POST messages to an already-marked session returns 404 `not_found`; one racing the marking may return 409
+  `turn_in_progress`, and its single client retry then gets 404.
+- Data created after the request started (for example a new session created in another tab during the deletion) can
+  survive; calling the endpoint again deletes it. Two concurrent calls by the same user are safe.
+
+Server sequence (data-model 1.7):
+1. Mark: list every session document of the caller (all states). For each `active` session, an ETag-conditional
+   replace sets `state = deleting` and `activeTurn = {turnId: <new delete lease id>, startedAt}` regardless of any
+   existing lock (ETag conflict -> re-read and retry). Sessions already `deleting` are skipped. From here each session
+   is invisible: GET returns 404, the list omits it, POST messages returns 404.
+2. Delete every message document of the caller in chunks of up to 100 (already-missing documents are ignored).
+3. Delete every session document listed in step 1 (already-missing documents are ignored).
+4. Return 204.
+The budget is checked before each replace and each chunk; when it is exceeded the server stops and returns 503
+`deletion_incomplete`. On client abort (`RequestAborted`) the server stops; nothing is rolled back.
+Not covered by the POST messages rate limiter. Logged: deleted document counts and `enduser.id` only.
+
+Client (SPA):
+- Called only from an explicit "Delete my data" action (account menu) after a confirmation dialog that says all chat
+  history in this app will be permanently deleted, that this cannot be undone, and that the sign-in account is not
+  deleted.
+- Before the call, abort any in-flight stream in this tab (AbortController).
+- On 503 `deletion_incomplete`: repeat after `Retry-After` seconds, at most 5 attempts in total; then show
+  "Deleting your data is taking longer than expected. Please try again in a minute."
+- On 204: drop all cached sessions and messages (React Query cache), show the empty new-chat view and the notice
+  "Your chat history was deleted. Your sign-in account was not deleted." plus `app.supportContact` from `/config.json`
+  if configured (auth-setup section 7). The user stays signed in.
+- Other errors: the generic error handling (401 retry/login, 5xx message).
+
 ## 3. Status codes for ownership
 
 - 401: missing/invalid/expired token. Header `WWW-Authenticate: Bearer`, body ProblemDetails `code: unauthorized`
   (custom JwtBearer challenge). Client: acquire token silently with force refresh, retry once, then redirect to login.
 - 403: valid token but missing the `access_as_user` scope or missing `oid` (for example an app-only token).
   Body ProblemDetails `code: forbidden`. 403 is never used for resources.
-- 404: session id unknown OR owned by another user (OR being deleted). Responses are identical except `traceId`.
-  Never 403. (Implementation: every read is `(id, partitionKey = oid)`; another user's session is simply not found.)
+- 404: session id unknown OR owned by another user (OR being deleted, OR expired). Responses are identical except
+  `traceId`. Never 403. (Implementation: every read is `(id, partitionKey = oid)`; another user's session is simply
+  not found.) `DELETE /api/me/data` never returns 404.
 
 ## 4. SSE stream
 
@@ -239,7 +316,7 @@ The backend owns the `message` text; workflows only supply a code. Codes not in 
 | `content_filtered` | Model content filter blocked input or output | "This request could not be processed. Please rephrase." |
 | `timeout` | Turn exceeded `Chat:TurnTimeout` (default 180 s, below the 240 s Container Apps ingress request timeout): an `OperationCanceledException` while the turn-timeout token is cancelled and `RequestAborted` is not | "The answer took too long. Please try again." |
 | `workflow_error` | Workflow logic failed (invalid structured output after retries, `TurnCompleted` with no tokens, protocol violation) | "Something went wrong. Please try again." |
-| `internal_error` | Anything else, including a workflow that ends without a terminal event, an `OperationCanceledException` that is neither client abort nor turn timeout, and a lost lease / vanished session at turn end (4.5) | "Something went wrong. Please try again." |
+| `internal_error` | Anything else, including a workflow that ends without a terminal event, an `OperationCanceledException` that is neither client abort nor turn timeout, and a lost lease / vanished session at turn end (4.5, incl. a concurrent `DELETE /api/me/data`) | "Something went wrong. Please try again." |
 
 ### 4.5 Cancellation and persistence
 
@@ -255,9 +332,10 @@ Persisted per turn (Cosmos, see /docs/data-model.md):
   aborted/timed-out request token.
 - The turn lock is released in a `finally` in all cases (the end-turn batch, or a lock-only release if no message is written).
 - Session gone or lease lost at turn end: if the session no longer exists (TTL expiry, deletion) or its lock now
-  belongs to someone else (the turn's lock went stale and was taken over by another turn or a DELETE), the server
-  persists NOTHING (no assistant message, lock untouched), logs a warning with session id and lease id only, and, if
-  the stream is still open, sends `error internal_error` instead of `done`.
+  belongs to someone else (the turn's lock went stale and was taken over by another turn or a DELETE, or it was taken
+  over by `DELETE /api/me/data`, which takes over live locks too), the server persists NOTHING (no assistant message,
+  lock untouched), logs a warning with session id and lease id only, and, if the stream is still open, sends
+  `error internal_error` instead of `done`.
 
 Partial (`cancelled`/`failed`) messages and user messages without a complete reply are shown in history but are NOT
 fed back to agents (data-model 1.6). The `messageId` in `done` is generated at turn start, so the partial message of a
@@ -357,17 +435,19 @@ Clients switch on `code` only; `type`/`title` are informational (ASP.NET Core de
 | 400 | `validation_failed` | Bad body/query, unknown `workflowId`, bad continuation token. `errors` lists fields. |
 | 401 | `unauthorized` | No/invalid token. |
 | 403 | `forbidden` | Token lacks scope or `oid`. |
-| 404 | `not_found` | Unknown, foreign or being-deleted session. |
-| 409 | `turn_in_progress` | Another turn is active for this session (POST messages, DELETE). |
+| 404 | `not_found` | Unknown, foreign, being-deleted or expired session. |
+| 409 | `turn_in_progress` | Another turn is active for this session (POST messages, DELETE session). Never returned by `DELETE /api/me/data`. |
 | 409 | `workflow_unavailable` | Session's `workflowId` is no longer registered. Client: show the session read-only with a notice and offer a new chat. |
 | 413 | `payload_too_large` | Body > 32 KB (backend). |
 | 415 | `unsupported_media_type` | Not `application/json`. |
 | 429 | `rate_limited` | Our per-user limiter on POST messages (keyed by `oid`, per replica; header `Retry-After` in seconds). Client: disable sending until `Retry-After` elapses. |
 | 500 | `internal_error` | Unhandled, incl. a failure after turn start but before the `session` event (lock released, 2.6). No details in production. |
+| 503 | `deletion_incomplete` | `DELETE /api/me/data` ran out of its time budget; progress kept; header `Retry-After: 1`. Client repeats the request (2.8). |
 
 Responses produced by nginx or the ingress are NOT ProblemDetails: nginx returns an HTML 413 for bodies > 64 KB, and
 502/503/504 may come from nginx/ingress. Clients map by status when the body is not `application/problem+json`
-(413 -> `payload_too_large`, 5xx -> `internal_error`).
+(413 -> `payload_too_large`, 5xx -> `internal_error`). A 503 is `deletion_incomplete` ONLY when the body is
+ProblemDetails with that `code`.
 
 ## 6. Limits (config keys in parentheses; durations are `TimeSpan` strings)
 
@@ -382,6 +462,8 @@ Responses produced by nginx or the ingress are NOT ProblemDetails: nginx returns
 | Heartbeat interval | `00:00:15` (`Chat:HeartbeatInterval`) |
 | Persistence after abort/failure | `00:00:05` (`Chat:PersistTimeout`) |
 | Per-user turns | 10 per minute per replica (`Chat:TurnsPerMinute`); effective limit scales with replica count |
+| Delete-my-data time budget per request | `00:01:00` (`Chat:DeleteUserDataBudget`, 00:00:05..00:03:00) |
+| Retention | `Chat:RetentionDays` per environment; defaults dev 30, test 30, prod 90 (data-model 1.3) |
 
 ## 7. Infrastructure requirements implied by this contract
 
@@ -391,8 +473,13 @@ Responses produced by nginx or the ingress are NOT ProblemDetails: nginx returns
   `proxy_read_timeout 300s`, pass `Authorization` through. No other backend paths are proxied.
 - Vite dev server (local only): `server.proxy['/api']` to the local backend, no buffering of `text/event-stream`.
 - Backend: no response compression for `text/event-stream` (exclude the SSE route if compression middleware is added).
-- Container Apps HTTP ingress request timeout is 240 s; the turn timeout (180 s) keeps streams below it.
+- Container Apps HTTP ingress request timeout is 240 s; the turn timeout (180 s) and the delete-my-data budget (60 s)
+  keep requests below it. Workflows that need longer than the turn timeout require a different pattern (background job
+  + polling), which would be a contract change (Q5, decided).
 - `config.json` (frontend runtime config) is served with `Cache-Control: no-store`.
+- `/data-deletion.html` (Facebook "Data deletion instructions URL", auth-setup section 4): a static, public page served
+  by the frontend nginx (no auth, no JavaScript, `Cache-Control: no-cache`, normal security headers). It is not an API
+  endpoint and is not proxied. Content requirements: auth-setup section 4.1.
 
 ## 8. Client rendering rules (assistant content)
 

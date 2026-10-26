@@ -250,6 +250,47 @@ public class RegistrationTests
     }
 
     [Theory]
+    [InlineData("Orchestrator", "<chat-deployment>")]
+    [InlineData("Orchestrator", "REPLACE_ME")]
+    [InlineData("Orchestrator", "replace_me-x")]
+    [InlineData("Policy", "<chat-deployment>")]
+    [InlineData("Policy", "REPLACE_ME")]
+    [InlineData("Policy", "replace_me-x")]
+    [InlineData("Claims", "<chat-deployment>")]
+    [InlineData("Claims", "REPLACE_ME")]
+    [InlineData("Claims", "replace_me-x")]
+    [InlineData("HealthAssessments", "<chat-deployment>")]
+    [InlineData("HealthAssessments", "REPLACE_ME")]
+    [InlineData("HealthAssessments", "replace_me-x")]
+    public void Validator_rejects_placeholder_deployment(string key, string value)
+    {
+        var options = new SupportTicketOptions();
+        foreach (var k in Workflows.SupportTicket.SupportTicketWorkflow.AgentKeys)
+        {
+            options.Agents[k] = new() { Deployment = k == key ? value : "gpt-ok" };
+        }
+
+        var result = new SupportTicketOptionsValidator().Validate(null, options);
+
+        Assert.True(result.Failed);
+        var failure = Assert.Single(result.Failures!);
+        Assert.Contains($"{key}:Deployment", failure);
+        Assert.DoesNotContain(value, failure);
+    }
+
+    [Fact]
+    public void Validator_accepts_real_deployment_names()
+    {
+        var options = new SupportTicketOptions();
+        foreach (var k in Workflows.SupportTicket.SupportTicketWorkflow.AgentKeys)
+        {
+            options.Agents[k] = new() { Deployment = "gpt-4o-mini" };
+        }
+
+        Assert.True(new SupportTicketOptionsValidator().Validate(null, options).Succeeded);
+    }
+
+    [Theory]
     [InlineData(0, true)]
     [InlineData(1, false)]
     [InlineData(10, false)]

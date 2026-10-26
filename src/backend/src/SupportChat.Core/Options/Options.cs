@@ -76,8 +76,14 @@ public sealed class ChatLimitsOptions
 
     public int TurnsPerMinute { get; set; } = 10;
 
-    /// <summary>Unset = keep forever (no ttl field). Open decision D7.</summary>
+    /// <summary>
+    /// Retention in days (1..3650, D7). ttl = days * 86400 on every message and session write. Unset = no ttl field
+    /// (allowed only in Development, ADR 0003 rule 9).
+    /// </summary>
     public int? RetentionDays { get; set; }
+
+    /// <summary>Time budget of DELETE /api/me/data (00:00:05..00:03:00, ADR 0003 rule 10).</summary>
+    public TimeSpan DeleteUserDataBudget { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>A lock older than TurnTimeout + this grace is stale and may be taken over (data-model 1.2).</summary>
     public static readonly TimeSpan StaleLockGrace = TimeSpan.FromSeconds(60);

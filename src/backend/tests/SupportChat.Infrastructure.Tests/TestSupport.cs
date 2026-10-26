@@ -13,6 +13,7 @@ internal static class TestConfig
     public static Dictionary<string, string?> Development() => new()
     {
         ["Azure:AuthMode"] = "Key",
+        ["Chat:RetentionDays"] = "30",
         ["Cosmos:Endpoint"] = "https://localhost:8081/",
         ["Cosmos:Key"] = "dGVzdC1rZXk=",
         ["Search:Endpoint"] = "https://example.search.windows.net",

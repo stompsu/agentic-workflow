@@ -46,9 +46,15 @@ public static class IngestionStartupValidator
             }
         }
 
-        if (string.IsNullOrWhiteSpace(options.EmbeddingDeployment))
+        if (string.IsNullOrWhiteSpace(options.EmbeddingDeployment) || ConfigPlaceholders.HasPlaceholder(options.EmbeddingDeployment))
         {
-            failures.Add("Ingestion:EmbeddingDeployment is required.");
+            failures.Add("Ingestion:EmbeddingDeployment is required and must not be a placeholder.");
+        }
+
+        // Optional (defaults to EmbeddingDeployment), but a placeholder value is never acceptable.
+        if (ConfigPlaceholders.HasPlaceholder(options.VectorizerDeployment))
+        {
+            failures.Add("Ingestion:VectorizerDeployment must not be a placeholder.");
         }
 
         return failures;

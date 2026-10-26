@@ -9,6 +9,7 @@ export type ApiErrorCode =
   | 'payload_too_large'
   | 'unsupported_media_type'
   | 'rate_limited'
+  | 'deletion_incomplete'
   | 'internal_error'
   | 'network_error'
   | 'aborted'
@@ -17,7 +18,7 @@ export type ApiErrorCode =
 export class ApiError extends Error {
   readonly status: number;
   readonly code: ApiErrorCode;
-  /** Seconds, from the Retry-After header (429). */
+  /** Seconds, from the Retry-After header (429, 503 deletion_incomplete). */
   readonly retryAfterSeconds?: number;
   readonly traceId?: string;
 
@@ -46,6 +47,7 @@ const MESSAGES: Record<string, string> = {
   payload_too_large: 'That message is too large to send.',
   unsupported_media_type: 'Something went wrong. Please try again.',
   rate_limited: 'You are sending messages too quickly.',
+  deletion_incomplete: 'Deleting your data is taking longer than expected. Please try again in a minute.',
   internal_error: 'Something went wrong. Please try again.',
   network_error: 'Could not reach the server. Check your connection and try again.',
 };
@@ -93,6 +95,6 @@ export async function errorFromResponse(response: Response): Promise<ApiError> {
     else code = 'internal_error';
   }
 
-  const retryAfterSeconds = status === 429 ? (retryParsed ?? 60) : undefined;
+  const retryAfterSeconds = status === 429 ? (retryParsed ?? 60) : status === 503 && code === 'deletion_incomplete' ? (retryParsed ?? 1) : undefined;
   return new ApiError({ status, code, ...(retryAfterSeconds !== undefined && { retryAfterSeconds }), ...(traceId !== undefined && { traceId }) });
 }

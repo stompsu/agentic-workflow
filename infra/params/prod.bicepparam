@@ -23,3 +23,15 @@ param cosmosAutoscaleMaxThroughput = 4000
 param deployIngestionJob = false
 param embeddingDeployment = 'text-embedding-3-small'
 param modelResourceId = '' // Foundry/Azure OpenAI account that hosts the embedding deployment
+
+// Retention (D7): user-changeable default, 1..3650 days.
+param chatRetentionDays = 90
+// Sign-in buttons (D6, auth-setup section 7). Prod: social only, no email entry.
+param authProviders = '[{"id":"google","label":"Continue with Google","domainHint":"google"},{"id":"facebook","label":"Continue with Facebook","domainHint":"facebook"}]'
+// Support contact for the "Delete my data" notice (user input; REPLACE_ME is caught by check-params.sh).
+param supportContact = 'REPLACE_ME'
+// Chat model deployment names in the Foundry project (D8, user input). REPLACE_ME is a placeholder: check-params.sh blocks
+// deploys that still contain it, and the backend rejects <...>/REPLACE_ME deployment names at startup. Orchestrator on a
+// cheaper model than the specialists.
+param orchestratorDeployment = 'REPLACE_ME'
+param specialistDeployment = 'REPLACE_ME'

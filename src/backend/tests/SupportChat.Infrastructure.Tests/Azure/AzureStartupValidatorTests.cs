@@ -252,6 +252,82 @@ public class AzureStartupValidatorTests
         Assert.Empty(Run(config, env, Echo));
     }
 
+    // Rule 9
+    [Theory]
+    [InlineData("Dev")]
+    [InlineData("Test")]
+    [InlineData("Production")]
+    public void RetentionDays_unset_fails_outside_Development(string env)
+    {
+        var config = env == "Production" ? TestConfig.Production() : TestConfig.Development();
+        config["AZURE_CLIENT_ID"] = "id";
+        config.Remove("Chat:RetentionDays");
+        Assert.Contains(Run(config, env), f => f.Contains("Chat:RetentionDays"));
+    }
+
+    [Fact]
+    public void RetentionDays_unset_is_allowed_in_Development()
+    {
+        var config = TestConfig.Development();
+        config.Remove("Chat:RetentionDays");
+        Assert.Empty(Run(config, "Development"));
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("3651")]
+    [InlineData("-1")]
+    [InlineData("abc")]
+    [InlineData("1.5")]
+    public void RetentionDays_out_of_range_or_not_an_integer_fails_everywhere(string value)
+    {
+        foreach (var env in new[] { "Development", "Test" })
+        {
+            var config = TestConfig.Development();
+            config["AZURE_CLIENT_ID"] = "id";
+            config["Chat:RetentionDays"] = value;
+            Assert.Contains(Run(config, env), f => f.Contains("Chat:RetentionDays"));
+        }
+    }
+
+    [Theory]
+    [InlineData("1")]
+    [InlineData("90")]
+    [InlineData("3650")]
+    public void RetentionDays_in_range_passes(string value)
+    {
+        var config = TestConfig.Production();
+        config["Chat:RetentionDays"] = value;
+        Assert.Empty(Run(config, "Production"));
+    }
+
+    // Rule 10
+    [Theory]
+    [InlineData("00:00:00")]
+    [InlineData("00:00:04")]
+    [InlineData("00:03:01")]
+    [InlineData("00:05:00")]
+    [InlineData("soon")]
+    public void DeleteUserDataBudget_out_of_range_fails(string value)
+    {
+        var config = TestConfig.Development();
+        config["Chat:DeleteUserDataBudget"] = value;
+        Assert.Contains(Run(config, "Development"), f => f.Contains("Chat:DeleteUserDataBudget"));
+    }
+
+    [Theory]
+    [InlineData("00:00:05")]
+    [InlineData("00:01:00")]
+    [InlineData("00:03:00")]
+    public void DeleteUserDataBudget_in_range_or_unset_passes(string value)
+    {
+        var config = TestConfig.Development();
+        config["Chat:DeleteUserDataBudget"] = value;
+        Assert.Empty(Run(config, "Development"));
+        config.Remove("Chat:DeleteUserDataBudget");
+        Assert.Empty(Run(config, "Development"));
+    }
+
     [Fact]
     public void Failure_messages_never_contain_secret_values()
     {

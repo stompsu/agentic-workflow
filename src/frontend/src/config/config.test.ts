@@ -51,4 +51,21 @@ describe('config', () => {
     await expect(loadConfig((async () => new Response('', { status: 404 })) as typeof fetch)).rejects.toThrow(/404/);
     await expect(loadConfig((async () => { throw new TypeError('x'); }) as typeof fetch)).rejects.toThrow(ConfigError);
   });
+
+  it('reads optional app.retentionDays and app.supportContact (plain text, trimmed)', () => {
+    expect(parseConfig(valid).info).toEqual({});
+    expect(parseConfig({ ...valid, app: { retentionDays: 90, supportContact: ' help@example.com ' } }).info).toEqual({
+      retentionDays: 90,
+      supportContact: 'help@example.com',
+    });
+    expect(parseConfig({ ...valid, app: { supportContact: '  ' } }).info).toEqual({});
+    expect(parseConfig({ ...valid, app: { supportContact: '<b>x</b>' } }).info.supportContact).toBe('<b>x</b>');
+  });
+
+  it.each([{ retentionDays: '90' }, { retentionDays: 0 }, { retentionDays: 3651 }, { retentionDays: 1.5 }, { supportContact: 5 }])(
+    'rejects invalid app info %#',
+    (app) => {
+      expect(() => parseConfig({ ...valid, app })).toThrow(ConfigError);
+    },
+  );
 });

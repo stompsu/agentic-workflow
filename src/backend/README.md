@@ -26,7 +26,9 @@ dotnet user-secrets set "Search:Key"        "<QUERY key, not the admin key>"
 dotnet user-secrets set "AzureAd:Instance"  "https://<tenant-subdomain>.ciamlogin.com/"
 dotnet user-secrets set "AzureAd:TenantId"  "<tenant guid>"
 dotnet user-secrets set "AzureAd:ClientId"  "<API app registration client id>"
-# SupportTicket is always registered, so these are required whenever the app runs (startup validation rule 7):
+# SupportTicket is always registered, so these are required whenever the app runs (startup validation rule 7).
+# appsettings.json ships <...> placeholders for the four Deployment keys; any value containing '<', '>' or REPLACE_ME
+# (case-insensitive) fails startup in every environment, so set real deployment names:
 dotnet user-secrets set "Foundry:ProjectEndpoint" "https://<res>.services.ai.azure.com/api/projects/<project>"
 dotnet user-secrets set "Workflows:SupportTicket:Agents:Orchestrator:Deployment"       "<chat deployment name>"
 dotnet user-secrets set "Workflows:SupportTicket:Agents:Policy:Deployment"             "<chat deployment name>"
@@ -36,7 +38,17 @@ dotnet user-secrets set "Workflows:SupportTicket:Agents:HealthAssessments:Deploy
 #           :Agents:<Key>:Temperature
 ```
 
-Optional chat limits live under `Chat:*` (plan.md section 5). Ingestion keys: see `src/SupportChat.Ingestion`.
+Optional chat limits live under `Chat:*` (plan.md section 5).
+
+Retention and "delete my data" (D7, ADR 0004):
+- `Chat:RetentionDays` (integer 1..3650): every message and session document gets `ttl = days * 86400` (the container
+  has `defaultTtl = -1`). Required in every environment except `Development`; startup fails otherwise (ADR 0003
+  rule 9). Deployed values come from the Bicep param `chatRetentionDays` (`Chat__RetentionDays`; defaults dev 30,
+  test 30, prod 90). In `Development` leave it unset (no `ttl`, nothing expires) or set it with user-secrets:
+  `dotnet user-secrets set "Chat:RetentionDays" "30"`.
+- `Chat:DeleteUserDataBudget` (`00:00:05`..`00:03:00`, default `00:01:00`, rule 10): time budget of
+  `DELETE /api/me/data`; when it runs out the endpoint answers `503 deletion_incomplete` + `Retry-After: 1` and the
+  client repeats the call (progress is kept; api-contract 2.8, data-model 1.7). Ingestion keys: see `src/SupportChat.Ingestion`.
 
 Foundry is always accessed with a `TokenCredential` (`az login` locally); there is no model key.
 Deployed environments (`Dev`, `Test`, `Production`) set the same keys as environment variables with `__`

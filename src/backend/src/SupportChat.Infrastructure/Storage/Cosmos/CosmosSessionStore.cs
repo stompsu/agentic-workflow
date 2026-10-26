@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Azure.Cosmos;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SupportChat.Core.Options;
 using SupportChat.Core.Storage;
@@ -10,7 +11,11 @@ namespace SupportChat.Infrastructure.Storage.Cosmos;
 /// Cosmos session store (data-model 1.5). Every operation passes PartitionKey(userId) in the request options AND
 /// filters on userId; there is no query without it.
 /// </summary>
-public sealed class CosmosSessionStore(CosmosChatContainer chat, IOptions<ChatLimitsOptions> options, TimeProvider timeProvider) : ISessionStore
+public sealed class CosmosSessionStore(
+    CosmosChatContainer chat,
+    IOptions<ChatLimitsOptions> options,
+    TimeProvider timeProvider,
+    ILogger<CosmosSessionStore>? logger = null) : ISessionStore
 {
     private const int DeleteBatchSize = 100;
     private Container Container => chat.Container;
@@ -90,6 +95,7 @@ public sealed class CosmosSessionStore(CosmosChatContainer chat, IOptions<ChatLi
 
             doc.State = DocumentTypes.Deleting;
             doc.ActiveTurn = new ActiveTurnDoc { TurnId = TurnRules.NewId(), StartedAt = now };
+            doc.Ttl = TurnRules.TtlSeconds(Options.RetentionDays);
             try
             {
                 await Container.ReplaceItemAsync(doc, doc.Id, pk, new ItemRequestOptions { IfMatchEtag = etag }, ct);
@@ -134,6 +140,118 @@ public sealed class CosmosSessionStore(CosmosChatContainer chat, IOptions<ChatLi
         }
 
         return DeleteSessionResult.Deleted;
+    }
+
+    public async Task<DeleteUserDataResult> DeleteAllUserDataAsync(string userId, TimeSpan budget, CancellationToken ct)
+    {
+        var pk = new PartitionKey(userId);
+        var deadline = timeProvider.GetUtcNow() + budget;
+        bool OutOfBudget() => timeProvider.GetUtcNow() >= deadline;
+        var marked = 0;
+        var messagesDeleted = 0;
+        var sessionsDeleted = 0;
+
+        DeleteUserDataResult Finish(DeleteUserDataResult result)
+        {
+            logger?.LogInformation(
+                "Delete user data {Result}: sessions marked {SessionsMarked}, messages deleted {MessagesDeleted}, sessions deleted {SessionsDeleted}, enduser.id {EndUserId}",
+                result, marked, messagesDeleted, sessionsDeleted, userId);
+            return result;
+        }
+
+        // 1. Mark every active session deleting, taking over any lock (live or stale).
+        var sessions = new List<SessionStub>();
+        var sessionsQuery = new QueryDefinition(
+                "SELECT c.id, c.state FROM c WHERE c.userId = @userId AND c.type = 'session'")
+            .WithParameter("@userId", userId);
+        using (var iterator = Container.GetItemQueryIterator<SessionStub>(
+                   sessionsQuery, requestOptions: new QueryRequestOptions { PartitionKey = pk, MaxItemCount = 500 }))
+        {
+            while (iterator.HasMoreResults)
+            {
+                sessions.AddRange(await iterator.ReadNextAsync(ct));
+            }
+        }
+
+        foreach (var stub in sessions.Where(x => x.State == DocumentTypes.Active))
+        {
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (OutOfBudget())
+                {
+                    return Finish(DeleteUserDataResult.Incomplete);
+                }
+
+                var read = await ReadAsync(userId, stub.Id, ct);
+                if (read is not { } current || current.Doc.State == DocumentTypes.Deleting)
+                {
+                    break; // gone or already marked: counts as done
+                }
+
+                var (doc, etag) = current;
+                var now = timeProvider.GetUtcNow();
+                doc.State = DocumentTypes.Deleting;
+                doc.ActiveTurn = new ActiveTurnDoc { TurnId = TurnRules.NewId(), StartedAt = now };
+                doc.Ttl = TurnRules.TtlSeconds(Options.RetentionDays);
+                try
+                {
+                    await Container.ReplaceItemAsync(doc, doc.Id, pk, new ItemRequestOptions { IfMatchEtag = etag }, ct);
+                    marked++;
+                    break;
+                }
+                catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
+                {
+                    // ETag conflict: re-read and retry.
+                }
+                catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+                {
+                    break;
+                }
+            }
+        }
+
+        // 2. All message documents of the user (orphans included), in chunks.
+        var messageIds = new List<string>();
+        var messagesQuery = new QueryDefinition(
+                "SELECT c.id FROM c WHERE c.userId = @userId AND c.type = 'message'")
+            .WithParameter("@userId", userId);
+        using (var iterator = Container.GetItemQueryIterator<IdOnly>(
+                   messagesQuery, requestOptions: new QueryRequestOptions { PartitionKey = pk, MaxItemCount = 500 }))
+        {
+            while (iterator.HasMoreResults)
+            {
+                messageIds.AddRange((await iterator.ReadNextAsync(ct)).Select(x => x.Id));
+            }
+        }
+
+        foreach (var chunk in messageIds.Chunk(DeleteBatchSize))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (OutOfBudget())
+            {
+                return Finish(DeleteUserDataResult.Incomplete);
+            }
+
+            await DeleteMessagesAsync(pk, chunk, ct);
+            messagesDeleted += chunk.Length;
+        }
+
+        // 3. The session documents listed in step 1.
+        foreach (var stub in sessions)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await Container.DeleteItemAsync<SessionDoc>(stub.Id, pk, cancellationToken: ct);
+                sessionsDeleted++;
+            }
+            catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+            {
+            }
+        }
+
+        return Finish(DeleteUserDataResult.Completed);
     }
 
     public async Task<StartTurnResult> TryStartTurnAsync(string userId, string sessionId, MessageRecord userMessage, CancellationToken ct)
@@ -257,7 +375,13 @@ public sealed class CosmosSessionStore(CosmosChatContainer chat, IOptions<ChatLi
             return;
         }
 
-        // A missing item (404) fails the whole batch; fall back to per-item deletes and ignore 404.
+        // A missing item (404, for example expired by TTL or deleted concurrently) fails the whole atomic batch.
+        // Only then redo the chunk as point deletes ignoring 404; any other failure propagates.
+        if (!(response.StatusCode == HttpStatusCode.NotFound || response.Any(r => r.StatusCode == HttpStatusCode.NotFound)))
+        {
+            throw new InvalidOperationException($"Deleting messages failed with Cosmos status {(int)response.StatusCode}.");
+        }
+
         foreach (var id in ids)
         {
             try
@@ -268,6 +392,13 @@ public sealed class CosmosSessionStore(CosmosChatContainer chat, IOptions<ChatLi
             {
             }
         }
+    }
+
+    private sealed class SessionStub
+    {
+        public required string Id { get; set; }
+
+        public string? State { get; set; }
     }
 
     private sealed class IdOnly

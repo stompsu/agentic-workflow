@@ -23,12 +23,17 @@ public static class Problems
         public const string UnsupportedMediaType = "unsupported_media_type";
         public const string RateLimited = "rate_limited";
         public const string InternalError = "internal_error";
+        public const string DeletionIncomplete = "deletion_incomplete";
     }
 
     public static IResult Create(int status, string code, IReadOnlyDictionary<string, string[]>? errors = null) =>
         new ProblemResult(status, code, errors);
 
     public static IResult NotFound() => Create(StatusCodes.Status404NotFound, Codes.NotFound);
+
+    /// <summary>503 deletion_incomplete with Retry-After: 1 (api-contract 2.8).</summary>
+    public static IResult DeletionIncomplete() => new RetryAfterResult(
+        Create(StatusCodes.Status503ServiceUnavailable, Codes.DeletionIncomplete), "1");
 
     public static IResult TurnInProgress() => Create(StatusCodes.Status409Conflict, Codes.TurnInProgress);
 
@@ -81,6 +86,7 @@ public static class Problems
         403 => "https://tools.ietf.org/html/rfc9110#section-15.5.4",
         404 => "https://tools.ietf.org/html/rfc9110#section-15.5.5",
         409 => "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+        503 => "https://tools.ietf.org/html/rfc9110#section-15.6.4",
         413 => "https://tools.ietf.org/html/rfc9110#section-15.5.14",
         415 => "https://tools.ietf.org/html/rfc9110#section-15.5.16",
         429 => "https://tools.ietf.org/html/rfc6585#section-4",
@@ -97,8 +103,18 @@ public static class Problems
         413 => "Payload too large",
         415 => "Unsupported media type",
         429 => "Too many requests",
+        503 => "Deletion incomplete",
         _ => "An unexpected error occurred",
     };
+
+    private sealed class RetryAfterResult(IResult inner, string seconds) : IResult
+    {
+        public Task ExecuteAsync(HttpContext httpContext)
+        {
+            httpContext.Response.Headers.RetryAfter = seconds;
+            return inner.ExecuteAsync(httpContext);
+        }
+    }
 
     private sealed class ProblemResult(int status, string code, IReadOnlyDictionary<string, string[]>? errors) : IResult
     {
