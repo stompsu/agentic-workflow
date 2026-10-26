@@ -6,4 +6,3 @@ tests/
 Dockerfile
 .dockerignore
 README.md
-**/.vs
