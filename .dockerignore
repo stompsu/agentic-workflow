@@ -13,3 +13,4 @@ infra/
 docs/
 **/Dockerfile*
 **/.dockerignore
+**/.vs
