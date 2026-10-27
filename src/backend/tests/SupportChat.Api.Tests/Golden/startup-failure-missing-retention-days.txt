@@ -1,0 +1,1 @@
+Chat:RetentionDays is required outside Development (integer 1..3650).

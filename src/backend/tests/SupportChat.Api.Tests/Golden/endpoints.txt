@@ -1,0 +1,11 @@
+/api/healthz [GET] authorize=- anonymous=True ratelimit=-
+/api/me/data [DELETE] authorize=ChatUser anonymous=False ratelimit=-
+/api/readyz [GET] authorize=- anonymous=True ratelimit=-
+/api/sessions [GET] authorize=ChatUser anonymous=False ratelimit=-
+/api/sessions [POST] authorize=ChatUser anonymous=False ratelimit=-
+/api/sessions/{sessionId} [DELETE] authorize=ChatUser anonymous=False ratelimit=-
+/api/sessions/{sessionId} [GET] authorize=ChatUser anonymous=False ratelimit=-
+/api/sessions/{sessionId}/messages [POST] authorize=ChatUser anonymous=False ratelimit=chat-messages
+/api/workflows [GET] authorize=ChatUser anonymous=False ratelimit=-
+/healthz [GET] authorize=- anonymous=True ratelimit=-
+/readyz [GET] authorize=- anonymous=True ratelimit=-

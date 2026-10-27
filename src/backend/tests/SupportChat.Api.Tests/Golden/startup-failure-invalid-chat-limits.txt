@@ -1,0 +1,2 @@
+Chat:TurnsPerMinute must be at least 1.
+Chat:MaxMessageChars must be at least 1.

@@ -1,0 +1,1 @@
+Chat:DeleteUserDataBudget must be a time span between 00:00:05 and 00:03:00.

@@ -1,0 +1,5 @@
+Azure:AuthMode must be ManagedIdentity in Production.
+Azure:AuthMode=Key is allowed only in Development, Dev and Test.
+Cosmos:Key must not be configured in Production.
+Search:Key must not be configured in Production.
+Cosmos:Endpoint must be an absolute https URI without placeholders.

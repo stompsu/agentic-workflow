@@ -1,0 +1,1 @@
+Foundry:ProjectEndpoint must be an absolute https URI without placeholders when a workflow other than 'echo' is registered.

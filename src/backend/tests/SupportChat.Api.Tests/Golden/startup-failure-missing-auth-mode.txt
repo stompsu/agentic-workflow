@@ -1,0 +1,1 @@
+Azure:AuthMode is missing (expected Key or ManagedIdentity).
