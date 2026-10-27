@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <!-- Own id: used only for the optional Foundry / Entra settings of local runs (ADR 0005 section 1). -->
+    <UserSecretsId>4b8e7c0a-2f64-4d19-9e0b-6a1f3c5d7e82</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../SupportChat.Core/SupportChat.Core.csproj" />
+    <ProjectReference Include="../SupportChat.Infrastructure/SupportChat.Infrastructure.csproj" />
+    <ProjectReference Include="../SupportChat.Agents/SupportChat.Agents.csproj" />
+    <ProjectReference Include="../SupportChat.Api/SupportChat.Api.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The Api appsettings.json is the first (lowest priority) JSON source: identical Chat:*, Search:TopK, Workflows:SupportTicket:* defaults. -->
+    <Content Include="../SupportChat.Api/appsettings.json" Link="appsettings.Api.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The repo knowledge/ corpus, loaded in memory at startup (ADR 0005 section 3). -->
+    <Content Include="../../../../knowledge/**/*.md" LinkBase="knowledge" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="SupportChat.LocalHost.Tests" />
+  </ItemGroup>
+</Project>

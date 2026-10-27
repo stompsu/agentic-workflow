@@ -10,7 +10,7 @@ export default tseslint.config(
   reactHooks.configs.flat['recommended-latest'] ?? reactHooks.configs.flat.recommended,
   {
     files: ['**/*.{ts,tsx}'],
-    languageOptions: { globals: { ...globals.browser, __E2E_MOCK_AUTH__: 'readonly' } },
+    languageOptions: { globals: { ...globals.browser, __E2E_MOCK_AUTH__: 'readonly', __LOCAL_AUTH__: 'readonly' } },
     rules: {
       // Rendering safety: never inject raw HTML.
       'no-restricted-syntax': [
@@ -20,7 +20,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['*.config.{js,ts}', 'scripts/**', 'e2e/**'],
+    files: ['*.config.{js,ts}', 'scripts/**', 'e2e/**', 'e2e-local/**'],
     languageOptions: { globals: { ...globals.node } },
   },
 );

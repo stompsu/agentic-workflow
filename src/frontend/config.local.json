@@ -1,0 +1,13 @@
+{
+  "apiBaseUrl": "/api",
+  "app": { "title": "Assistant (local)" },
+  "auth": {
+    "clientId": "00000000-0000-0000-0000-000000000000",
+    "authority": "http://localhost:5080/local-auth",
+    "apiScopes": ["access_as_user"],
+    "providers": [
+      { "id": "local-alice", "label": "Sign in as Alice (local)", "domainHint": "alice" },
+      { "id": "local-bob", "label": "Sign in as Bob (local)", "domainHint": "bob" }
+    ]
+  }
+}

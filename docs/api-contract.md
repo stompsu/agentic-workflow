@@ -2,6 +2,7 @@
 
 Status: v1 (Phase 0, revised 2026-10-25 after the second qa-reviewer pass; D7 additions 2026-10-25: `DELETE /api/me/data`,
 503 `deletion_incomplete`, retention notes). All D7 additions are additive (no version bump).
+2026-10-27: local-mode note in section 1 (ADR 0005); informational only, no contract change, no version bump.
 Change this file FIRST, then backend and frontend.
 Owners: architect (contract), backend-dotnet (server), frontend-react (client), qa-reviewer (compliance).
 
@@ -22,6 +23,12 @@ Owners: architect (contract), backend-dotnet (server), frontend-react (client), 
 - Retention: chat data expires automatically (`Chat:RetentionDays`, data-model 1.3). The API exposes no retention
   value or expiry time; clients must tolerate sessions disappearing from the list and old messages disappearing from
   a session (2.5).
+- Local mode (/docs/adr/0005-local-mode.md): the local-only `SupportChat.LocalHost` executable serves the identical
+  `/api` contract (same endpoints, SSE events, status codes and ProblemDetails, same `ChatUser` policy and `oid`
+  scoping); with `LocalMode:Auth=Local` the bearer token comes from a local issuer instead of Entra External ID and is
+  still a validated, signed JWT. The `/local-auth/*` endpoints (e.g. `POST /local-auth/token`) exist ONLY in the
+  LocalHost executable, are outside `/api`, and are NOT part of this contract (ADR 0005 section 5). Local mode is
+  never available in any Azure environment (ADR 0003 rule 11).
 
 ## 2. Endpoints
 

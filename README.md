@@ -66,6 +66,27 @@ Cosmos emulator: `CosmosEmulatorTests` in `SupportChat.Infrastructure.Tests` run
 skipped unless it answers at `COSMOS_EMULATOR_ENDPOINT` (default `https://localhost:8081/`; key override
 `COSMOS_EMULATOR_KEY`). Start the emulator, then `dotnet test src/backend`. CI has no emulator, so they are skipped there.
 
+## Run locally without Azure
+
+Design: [docs/adr/0005-local-mode.md](docs/adr/0005-local-mode.md). Prerequisites: .NET 10 SDK and Node 24 (no Azure account, no secrets).
+```bash
+node scripts/run-local.mjs        # backend http://localhost:5080, app http://localhost:5173
+```
+Open http://localhost:5173 and sign in as Alice or Bob (a local sign-in, not a real identity provider). Ctrl+C stops both.
+
+- Chats live in memory and are lost when the backend restarts. Knowledge search is an in-memory keyword search over the
+  repo `knowledge/` files (not Azure AI Search).
+- Answers are scripted: no AI model is used and each answer says so. The classification, routing, tool call and citations
+  run through the real workflow code.
+- `--models foundry` uses a real Foundry project instead (user-secrets `Foundry:ProjectEndpoint` and the four
+  `Workflows:SupportTicket:Agents:*:Deployment` names, `az login`). Your local chats and the retrieved knowledge text are then
+  sent to that Foundry project.
+- `--auth entra` uses real Entra External ID sign-in instead of the local one (user-secrets `AzureAd:*`); the script then starts the SPA
+  with plain `npm run dev` (MSAL) instead of `dev:local`.
+- The local backend only starts in Development, on loopback, outside containers and hosted environments; it is not part of any
+  image or pipeline. The production API refuses `LocalMode:Enabled` in every environment.
+- `npm run e2e:local` (Playwright against the real local backend) is manual only; CI does not run it.
+
 ## Tests
 
 ```bash

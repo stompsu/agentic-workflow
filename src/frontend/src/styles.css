@@ -119,3 +119,4 @@ body { background: var(--bg); color: var(--text); }
 .modal { background: var(--panel); color: var(--text); border-radius: 10px; padding: 1.5rem; max-width: 30rem; width: 100%; }
 .modal h2 { margin-top: 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+.local-banner { border-radius: 0; margin-bottom: 0; justify-content: center; }

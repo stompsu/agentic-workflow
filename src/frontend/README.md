@@ -6,8 +6,10 @@ Vite + React + TypeScript (strict). Node >= 24 (`.nvmrc`).
 |---|---|
 | `npm run dev` | Vite dev server on :5173, `/api` proxied to `http://localhost:5080` (override with `BACKEND_URL`) |
 | `npm run lint` / `typecheck` / `test` | ESLint / `tsc --noEmit` / `vitest run` |
-| `npm run build` | `tsc` + `vite build` + `scripts/check-dist.mjs` (fails if e2e mock-auth code is in `dist/`) |
+| `npm run build` | `tsc` + `vite build` + `scripts/check-dist.mjs` (fails if e2e mock-auth or local-mode code is in `dist/`) |
 | `npm run test:entrypoint` | shell test of the container entrypoint (escaping, validation); needs `jq` |
+| `npm run dev:local` | Local mode (see below): `vite --mode localdev`, local sign-in, proxies `/api` and `/local-auth` |
+| `npm run e2e:local` | Manual local-mode Playwright suite against the real LocalHost backend (not in CI) |
 | `npm run e2e` | Playwright happy path + delete-my-data (needs browsers: `npx playwright install chromium`, not run automatically) |
 
 ## Runtime config
@@ -51,3 +53,25 @@ Query cache, shows the new-chat view and a notice (plus `app.supportContact` whe
 which swaps MSAL for `src/auth/mockAuth.tsx`. It cannot reach production: `vite build --mode e2e` throws, in normal
 builds the constant is `false` so the mock module is dead code and not bundled, and `scripts/check-dist.mjs`
 (part of `npm run build` and the Docker build) fails if the marker string `E2E_MOCK_AUTH_ACTIVE` appears in `dist/`.
+
+## Local mode
+
+Runs the SPA against the local backend (`SupportChat.LocalHost`, ADR 0005) without Azure or Entra. Easiest from the repo
+root: `node scripts/run-local.mjs` (starts the backend on :5080 and `npm run dev:local`, then open
+`http://localhost:5173`). Frontend only: start the LocalHost, then `npm run dev:local`.
+
+- `vite --mode localdev` (dev server only) defines `__LOCAL_AUTH__ = true`; `AuthProvider` then lazy-loads
+  `src/auth/localAuth.tsx` instead of MSAL (precedence: e2e mock > local > MSAL). A "LOCAL MODE" banner is always shown.
+- `/config.json` is answered from `config.local.json` (outside `public/`, so never in `dist/`): two providers, "Sign in as
+  Alice/Bob (local)". `clientId` and `authority` are placeholders that local auth ignores.
+- Sign-in is `POST /local-auth/token` with `{"user":"alice"}` (Vite proxies `/local-auth` and `/api` to `BACKEND_URL`,
+  default `http://localhost:5080`). The token is kept in `sessionStorage`, replaced 60 s before it expires and on a
+  forced refresh (after a backend restart the 401 path fetches a new one). Chats are in memory and lost on restart.
+- The dev server is pinned to `localhost:5173` (`strictPort`; the token endpoint only accepts that Origin) and refuses
+  to start with `--host`. `vite build --mode localdev` throws, and `scripts/check-dist.mjs [dir]` fails the build if
+  `dist/` contains `LOCAL_DEV_AUTH_ACTIVE`, `/local-auth/` or `config.local.json` (self-test:
+  `node scripts/check-dist.test.mjs`, also run by `npm test`).
+- `npm run e2e:local` (manual, not CI): `playwright.local.config.ts` starts the real LocalHost and `dev:local`, then runs
+  `e2e-local/` (sign in as Alice, streamed scripted answer with agent badge and citation, Stop, Bob cannot see Alice's
+  chat, delete my data). Needs the .NET 10 SDK and `npx playwright install chromium`; ports 5080 and 5173 must be free
+  (an already running instance is reused).

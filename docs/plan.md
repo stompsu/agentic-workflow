@@ -5,6 +5,10 @@ Phase 0 (this) produced: /docs/api-contract.md, /docs/data-model.md, /docs/auth-
 Revised 2026-10-25 with user decisions (section 6) and qa-reviewer findings (second review: S1-S6 + nits applied).
 Revised again 2026-10-25: the user accepted all recommendations for D4, D6-D10 and Q5 (section 6); new
 /docs/adr/0004-retention-and-user-data-deletion.md; follow-up work in Phase 5 (section 3).
+Added 2026-10-26: section 7 "Local mode (feature/local-mode)" and /docs/adr/0005-local-mode.md (Proposed; waits for
+the user's answers to L1-L10).
+Revised 2026-10-27: the user accepted all recommendations for L1-L10 (7.5) and confirmed the L3 exception; ADR 0005
+is Accepted; local-mode Phase 1 started (docs step done: ADR 0003 rule 11, api-contract section 1 note).
 Contract changes go through architect first. qa-reviewer gates the end of every phase.
 
 ## 1. Repo layout
@@ -49,6 +53,7 @@ docs/
 Dependency direction: Api -> Agents -> Core; Api -> Infrastructure -> Core; Agents never references Infrastructure.
 `IChatClientFactory`, `IPromptProvider` and `IKnowledgeSearch` are declared in Core. Implementations:
 `ChatClientFactory` and the Search-backed `IKnowledgeSearch` in Infrastructure, `EmbeddedPromptProvider` in Agents.
+Local mode additions (section 7): `SupportChat.LocalHost` -> Api, Agents, Infrastructure, Core; nothing references it.
 
 ## 2. Interfaces between components
 
@@ -443,3 +448,191 @@ Q4. Local Node upgraded to v26.12.1 (2026-10-25); frontend Docker build stage an
 Q2. Pipeline templates now exist in `.claude/skills/github-actions-pipelines/templates/`; devops-pipelines uses them.
 Q3. actionlint is being installed locally; devops-pipelines lints with it.
 (Q7, agent file names, fixed and removed.)
+
+## 7. Local mode (feature/local-mode)
+
+Goal (user, 2026-10-26): run the application locally with an in-memory session store and an in-memory replacement for
+Azure AI Search. Design: /docs/adr/0005-local-mode.md (Accepted 2026-10-27). Phase 0 = this section + ADR 0005 (no src/ edits).
+Phase 1 (implementation) starts only after the user has answered L1-L10 (7.5).
+Revised 2026-10-26 with qa-reviewer findings (ADR 0005 header lists them). L3(b) is now an explicit LocalHost-only
+exception to the CLAUDE.md rule "Backend validates JWTs only" and needs the user's confirmation plus a user-made
+CLAUDE.md amendment before the local issuer is implemented.
+Resolved 2026-10-27: the user answered L1-L10 with every recommendation (7.5) and explicitly confirmed the L3
+exception (local ES256 JWT issuer only in `SupportChat.LocalHost`); the user amends CLAUDE.md themselves. Phase 1
+started; the architect docs step is done (ADR 0005 Accepted, ADR 0003 rule 11, api-contract section 1 note).
+
+### 7.1 Layout additions
+```
+src/backend/src/SupportChat.LocalHost/          # local-only exe (ADR 0005): LocalProgram, LocalModeValidator (G1-G4),
+                                                # LocalTokenIssuer + POST /local-auth/token, AddLocalJwtBearer,
+                                                # InMemoryKnowledgeSearch, ScriptedChatClient(+Factory), LocalReadinessCheck,
+                                                # appsettings.json, appsettings.Development.json, Properties/launchSettings.json
+                                                # (repo knowledge/ and the Api appsettings.json copied to output)
+src/backend/tests/SupportChat.LocalHost.Tests/  # guards (incl. G6 repo scan), token endpoint, search relevance,
+                                                # scripted model, end-to-end over SSE
+src/backend/src/SupportChat.Api/Hosting/ApiHost.cs                  # composition extracted from Program.cs (no behaviour change)
+src/backend/src/SupportChat.Infrastructure/Search/Source/           # MarkdownChunker, KnowledgeSource, ChunkIds, IngestionPlan (moved)
+src/frontend/config.local.json                  # local runtime config (NOT in public/), committed, no secrets
+src/frontend/src/auth/localAuth.tsx             # local auth provider (marker LOCAL_DEV_AUTH_ACTIVE)
+src/frontend/playwright.local.config.ts, src/frontend/e2e-local/
+scripts/run-local.mjs                           # one command: LocalHost + vite --mode localdev
+```
+
+### 7.2 Interfaces
+| From -> To | Interface | Defined in |
+|---|---|---|
+| LocalHost -> Api | `ApiHost.ConfigureServices(builder, addPlatform, addJwtBearer)` (today's registration order, callbacks at steps 4-5) / `MapApi` / `RunAsync(app, hostAssembly)`, `AddChatAuthorization` (owns `AddHttpContextAccessor` + `ICurrentUser`), `AddEntraJwtBearer` | ADR 0005 section 1 |
+| LocalHost -> Agents | implements Core `IKnowledgeSearch`, `IChatClientFactory`, `IReadinessCheck`; Agents unchanged | ADR 0005 sections 3-4 |
+| LocalHost -> Infrastructure | `InMemoryChatStore` (as `ISessionStore` + `IMessageStore`), `Search.Source.*`, `DomainValue`, `KnowledgeIndexSchema.MaxTop`; with `Models=Foundry` also `AzureCredentialProvider` + `ChatClientFactory` | ADR 0005 sections 2-4 |
+| `ScriptedChatClient` -> `search_knowledge` | tool result JSON `{results:[{ref,title,sourceUrl,content}], note}` (pinned by a contract test) | ADR 0005 section 4 |
+| `ScriptedChatClient` -> orchestrator prompt | `last_category` sentence of `orchestrator.v1.md` (pinned by a contract test) | ADR 0005 section 4 |
+| SPA (`vite --mode localdev`) -> LocalHost | `POST /local-auth/token` `{user}` -> `{accessToken, expiresIn, user}` (outside `/api`; `Content-Type: application/json`; `Origin` absent or `http://localhost:5173`) | ADR 0005 section 5 |
+| SPA -> API | unchanged `/api` contract; token from the local issuer instead of Entra | api-contract, ADR 0005 section 5 |
+| Ingestion, LocalHost -> chunking | `SupportChat.Infrastructure.Search.Source` (moved verbatim) | ADR 0005 section 3 |
+
+### 7.3 Configuration keys (LocalHost only)
+`SupportChat.Api` fails startup in every environment if `LocalMode:Enabled` is `true` or not a valid bool (ADR 0003
+rule 11, added in Phase 1). None of these keys is set in Bicep, pipelines or Dockerfiles (G6 repo-scan test).
+The LocalHost content root is `AppContext.BaseDirectory`; it loads only the Api's `appsettings.json` (not its
+`appsettings.Development.json`).
+
+| Key | Default | Notes |
+|---|---|---|
+| `LocalMode:Enabled` | `true` in LocalHost `appsettings.Development.json` only | G2; LocalHost fails without it |
+| `LocalMode:Auth` | `Local` | `Local` (local issuer, needs L3 confirmation) or `Entra` (nonprod tenant via user-secrets `AzureAd:*`) |
+| `LocalMode:LocalAuth:TokenLifetime` | `01:00:00` | `00:05:00`..`08:00:00` |
+| `LocalMode:Models` | `Scripted` | `Scripted` or `Foundry` (`Foundry:ProjectEndpoint` + 4 deployments via user-secrets, `az login`) |
+| `LocalMode:Scripted:TokenDelay` | `00:00:00.030` | `00:00:00`..`00:00:01` |
+| `LocalMode:Knowledge:SourcePath` | `knowledge` (repo `knowledge/` copied to output; relative to `AppContext.BaseDirectory`) | startup fails if missing or empty |
+| `AllowedHosts` | `localhost;127.0.0.1;[::1]` (LocalHost `appsettings.json`) | startup fails if it contains `*` or a non-loopback host |
+| URLs (`urls`, `http_ports`, `https_ports`, `Kestrel:Endpoints:*:Url`) | launchSettings `http://localhost:5080` | G4: validated before `Build()`; loopback only; `*_PORTS` always rejected |
+| `Workflows:SupportTicket:Agents:*:Deployment` | `scripted-orchestrator` / `scripted-specialist` | LocalHost `appsettings.json`; overridden by user-secrets for `Foundry` |
+| `Workflows:Echo:Enabled` | `true` | allowed in Development |
+| `Chat:*`, `Search:TopK` | from the Api `appsettings.json` (linked base file) | `Chat:RetentionDays` unset: nothing expires |
+
+Frontend: `npm run dev:local` = `vite --mode localdev` (host `localhost`, port 5173 strict, `--host` refused; proxies
+`/api` and `/local-auth` to `BACKEND_URL`, default `http://localhost:5080`; serves `/config.json` from
+`config.local.json` via `configureServer` middleware). Playwright CI suite stays on 4173 (`--mode e2e`).
+
+### 7.4 Tasks
+Order: architect -> backend-dotnet step A (behaviour-preserving refactors, own commits, Api.Tests green unchanged) ->
+backend-dotnet step B + agent-workflows + frontend-react in parallel -> qa-reviewer. No azure-infra or
+devops-pipelines work (CI already runs `dotnet build/test src/backend`, which picks up the new projects; `npm run e2e`
+keeps using `e2e/` only). The local issuer (`Auth=Local`) is implemented only after the user confirmed L3 and amended
+CLAUDE.md; otherwise step B ships `Auth=Entra` only.
+Status 2026-10-27: architect step done; L3 confirmed by the user, so step B implements `Auth=Local` now; the user's
+CLAUDE.md amendment must land before this branch merges; L7 = no, so devops-pipelines has no task.
+- architect (start of Phase 1, after the user's answers): ADR 0005 -> Accepted with the answers; ADR 0003 section 4
+  rule 11 (`LocalMode:Enabled` fails the Api) + its test bullet; api-contract section 1: one note "Local mode
+  (ADR 0005): `/api` unchanged; tokens come from a local issuer; `/local-auth/token` is local-only and not part of
+  this contract"; README docs table lists ADR 0005. Never edits CLAUDE.md (the L3 amendment is the user's).
+- backend-dotnet, step A (no behaviour change):
+  - First commit: Api.Tests regression snapshots against today's `Program.cs` (ADR 0005 section 1): startup-failure
+    messages, ordered service registrations, endpoint list, middleware-order probes.
+  - Second commit: `ApiHost.ConfigureServices(builder, addPlatform, addJwtBearer)` / `MapApi` / `RunAsync` keeping
+    today's exact order (`AddAgentWorkflows`, platform, JWT bearer, `AddChatAuthorization`, rate limiting, validators,
+    `ChatTurnRunner`, compression); split `AddChatAuth` into `AddEntraJwtBearer` + `AddChatAuthorization` (the latter
+    owns `AddHttpContextAccessor` and `ICurrentUser`; `AddChatAuth` remains as both); `--smoke-check` branch stays in
+    Api `Program.cs`. Snapshots byte-identical.
+  - Move `MarkdownChunker`, `KnowledgeSource`, `ChunkIds`, `IngestionPlan` to `SupportChat.Infrastructure.Search.Source`
+    verbatim; Ingestion and Ingestion.Tests only change `using`s; chunk ids unchanged.
+  - `AzureStartupValidator` rule 11 + tests in every environment (defence in depth, ADR 0005 G5).
+- backend-dotnet, step B:
+  - `SupportChat.LocalHost` project (added to `SupportChat.slnx`): `LocalProgram` (explicit namespace + `Main`, order
+    per ADR 0005 section 1), content root `AppContext.BaseDirectory`, linked `appsettings.Api.json` base (copied to
+    output), knowledge copied to output, own `appsettings*.json` (incl. `AllowedHosts`), launchSettings
+    `http://localhost:5080` + `ASPNETCORE_ENVIRONMENT=Development`, own `UserSecretsId`; `LocalModeValidator` G1-G3
+    (G3 incl. `CONTAINER_APP_JOB_NAME`, `CONTAINER_APP_ENV_DNS_SUFFIX`, `DOTNET_RUNNING_IN_CONTAINER`), G4(a) URL check
+    before `Build()` and G4(b) post-start check for every `Auth` mode, `AllowedHosts` rule, rules for `Auth`, `Models`,
+    `TokenDelay`, `TokenLifetime`, knowledge path; `--smoke-check` refused (G7).
+  - Platform registration: `InMemoryChatStore` singleton as both store interfaces; `InMemoryKnowledgeSearch` (BM25,
+    `DomainValue.Require(domain, nameof(domain))`, ADR 0005 section 3); `LocalReadinessCheck`; options binding
+    (`SearchServiceOptions`, `ChatLimitsOptions`, `FoundryOptions`); `Models=Foundry` -> real `AzureCredentialProvider`
+    + `ChatClientFactory`.
+  - After L3 confirmation: `LocalTokenIssuer` (ECDSA P-256 in memory, singleton), `POST /local-auth/token` (anonymous,
+    ProblemDetails 400/403/415, JSON content type and `Origin` checks, bodies never logged), and `AddLocalJwtBearer`
+    (ES256 only, `RequireSignedTokens`, `ValidateIssuerSigningKey`, `MapInboundClaims` = production value);
+    `Auth=Entra` -> `AddEntraJwtBearer`.
+  - `InMemoryChatStore` doc comment ("tests and local mode"); `src/backend/.dockerignore` adds `src/SupportChat.LocalHost/`.
+  - `scripts/run-local.mjs` (ADR 0005 section 6), coordinated with frontend-react for `dev:local`.
+  - Tests (ADR 0005 section 7, backend part): guards incl. the G4(a) URL matrix and the G6 repo scan (non-empty scan
+    sets), token endpoint hardening, Api rejects a LocalHost-signed token, `MapInboundClaims` equality, G5,
+    `InMemoryKnowledgeSearch` relevance + injection fixtures, end-to-end SSE through the LocalHost with real local
+    tokens (routed answer + citation, clarification, isolation, delete my data, abort, bad tokens).
+  - Docs: `src/backend/README.md` LocalHost section; root `README.md` "Run locally without Azure" section
+    (prerequisites .NET 10 SDK + Node 24, `node scripts/run-local.mjs`, ports, flags, data lost on restart,
+    scripted answers are not AI, `--models foundry` sends local chats to Foundry, `npm run e2e:local` is manual only).
+- agent-workflows:
+  - `ScriptedChatClient` (both `GetResponseAsync` and `GetStreamingResponseAsync`) + `ScriptedChatClientFactory` in
+    `SupportChat.LocalHost/Models/` per ADR 0005 section 4 (whole-token keyword matching, `last_category` follow-ups,
+    classification JSON, tool call, snippet cleaning, `[S<n>]` stripped from retrieved content, cited answer, word
+    streaming preserving whitespace with `TokenDelay`, unknown shape throws).
+    Verify first against the pinned MAF / Microsoft.Extensions.AI versions how `RunAsync<T>` sets `ResponseFormat`,
+    how instructions reach the client and how `FunctionInvokingChatClient` returns `FunctionResultContent`.
+  - No change to `SupportTicketWorkflow`, prompts, `KnowledgeSearchTool` or `CitationCollector`.
+  - Tests: scripted client unit tests (incl. injection fixture: only tool-emitted refs cited), the tool-JSON and
+    `last_category` contract tests; SupportTicket end-to-end with `ScriptedChatClientFactory` +
+    `InMemoryKnowledgeSearch` for each category, clarification, max clarifications.
+- frontend-react:
+  - `vite.config.ts`: mode `localdev` -> `__LOCAL_AUTH__` true only for serve; `vite build --mode localdev` throws;
+    `server.host: 'localhost'`, `strictPort`, default `allowedHosts`, a resolved-host check that refuses `--host`;
+    proxy `/local-auth`; `/config.json` middleware from `config.local.json` registered in `configureServer` (before
+    static middleware), `localdev` only.
+  - `src/auth/localAuth.tsx` (lazy-loaded behind `__LOCAL_AUTH__` like `mockAuth.tsx`; "LOCAL MODE" banner; marker
+    `LOCAL_DEV_AUTH_ACTIVE` as a runtime string literal; `login(domainHint)` -> token for that user; `sessionStorage`;
+    refresh 60 s before `exp` and on `forceRefresh`); `AuthProvider` precedence e2e mock > local > MSAL; global type
+    for `__LOCAL_AUTH__`.
+  - `config.local.json` exactly as in ADR 0005 section 5 (`auth.clientId` `00000000-0000-0000-0000-000000000000`,
+    `auth.authority` `http://localhost:5080/local-auth`, `auth.apiScopes` `["access_as_user"]`, Alice/Bob providers,
+    no `knownAuthorities`, `app.title` "Assistant (local)"); `package.json` scripts `dev:local`, `e2e:local`.
+  - `scripts/check-dist.mjs`: optional directory argument (default `dist`); also fail on `LOCAL_DEV_AUTH_ACTIVE`,
+    `/local-auth/` and a `config.local.json` file in the directory (belt-and-braces); a self-test with fixture dirs.
+  - Tests: Vitest for `localAuth` and `config.local.json` parsing; build-mode and `--host` guards; Playwright
+    `playwright.local.config.ts` + `e2e-local/` on 5173 against the real LocalHost (manual, not CI in v1).
+  - `src/frontend/README.md` "Local mode" section (incl. `e2e:local` manual only).
+- azure-infra: none (confirm no Bicep change).
+- devops-pipelines: none in v1. Only if the user answers L7 = yes: a CI job for `npm run e2e:local` (needs .NET +
+  Node in one job); never run or change workflows without asking.
+- qa-reviewer: G1-G8 present and tested; step A snapshots committed before the refactor and unchanged after it;
+  `Program.cs` before/after diff shows no behaviour change; Api.Tests unchanged and green; G6 repo scan green and
+  non-vacuous, `.dockerignore` line present, `docker build` of support-backend still succeeds; token endpoint
+  hardening and JWT parameters as specified; no local issuer code before the user's L3 confirmation; production
+  `dist/` passes the extended `check-dist`; no secrets committed; log rules (no message content, no tokens, no
+  token-endpoint bodies) hold in the LocalHost too; `oid` scoping unchanged.
+
+### 7.5 Decisions for the user (recommendation in brackets)
+All resolved 2026-10-27: the user accepted the recommendation in brackets for every decision (ADR 0005 section 9).
+L1. Packaging: separate `SupportChat.LocalHost` exe that production images never contain, vs a `LocalMode:Enabled`
+    flag inside `SupportChat.Api`. [Separate LocalHost.]
+    Resolved: separate LocalHost.
+L2. Models locally: (a) real Foundry via `az login` (needs a Foundry project + deployments; local chats are then sent
+    to Foundry), (b) deterministic scripted `IChatClient` (no Azure at all), (c) both, selectable by
+    `LocalMode:Models`. [(c) with (b) as default.]
+    Resolved: (c), default `Scripted`.
+L3. Auth locally: (a) real Entra External ID nonprod tenant (needs internet, tenant setup and the localhost redirect
+    URI), (b) local JWT issuer in the LocalHost + SPA local sign-in (Alice/Bob); `/api` still validates a signed JWT
+    and uses its `oid`. (b) is an explicit EXCEPTION to the CLAUDE.md hard rule "Backend validates JWTs only", limited
+    to the LocalHost exe (never in an image, Development + loopback only). Choosing (b) means you confirm the exception
+    and amend CLAUDE.md yourself (agents do not edit it), e.g. "exception: the local-only issuer of
+    SupportChat.LocalHost, ADR 0005". [(b) default, (a) selectable by `LocalMode:Auth`; if you decline the exception,
+    (a) only.]
+    Resolved: (b) default, (a) selectable. The user explicitly confirmed the exception (local ES256 JWT issuer only in
+    `SupportChat.LocalHost`) and amends CLAUDE.md themselves.
+L4. How to run: `node scripts/run-local.mjs` (dotnet run + vite) vs Docker Compose (backend + nginx frontend).
+    [Script only in v1; Compose later if needed, which requires a never-pushed local backend image and a frontend dev
+    container.]
+    Resolved: script only in v1.
+L5. Persist local chats to a file across restarts. [No for v1; in-memory only.]
+    Resolved: no; in-memory only.
+L6. Keep the echo workflow enabled locally. [Yes.]
+    Resolved: yes.
+L7. Run `npm run e2e:local` (real LocalHost) in CI. [No for v1; manual. Would need a devops-pipelines change and
+    your approval.]
+    Resolved: no for v1; manual only.
+L8. Scripted answers end with "_Scripted local answer: no AI model was used._". [Yes.]
+    Resolved: yes.
+L9. Move the ingestion chunker/source reader into `SupportChat.Infrastructure` so ingestion and local search share
+    it (pure code; it ends up in the API image unused), vs the LocalHost referencing the Ingestion exe. [Move.]
+    Resolved: move.
+L10. Reload knowledge files on change. [No; restart the LocalHost.]
+    Resolved: no; restart the LocalHost.

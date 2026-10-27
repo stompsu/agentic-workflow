@@ -3,6 +3,7 @@
 Status: Accepted (revised 2026-10-25). Decision D5 (managed identity for Foundry in all deployed environments, no
 service-principal secret) is Decided; `.claude/agents/azure-infra.md` is aligned. Skill: azure-auth-switch.
 2026-10-25: rules 9-10 added (D7 retention / delete-my-data config); D8 resolved (Foundry inputs supplied by the user).
+2026-10-27: rule 11 added (local mode flag refused by the API; ADR 0005 G5, decision L1).
 
 ## Context
 
@@ -98,7 +99,12 @@ Environment names and `AuthMode` values are compared case-insensitively (`String
    (D7: every deployed environment must expire data; defaults dev 30, test 30, prod 90, data-model 1.3).
 10. `Chat:DeleteUserDataBudget` is not a `TimeSpan` in `00:00:05`..`00:03:00` (default `00:01:00`; must stay below the
     240 s ingress timeout, api-contract 2.8).
+11. `LocalMode:Enabled` is `true` or is not a valid bool, in EVERY environment (including `Development`): the
+    production API refuses to start when the local-mode flag is set. Local mode is implemented only by the separate
+    `SupportChat.LocalHost` executable, which no image contains; it is never available in any Azure environment
+    (ADR 0005 G5, defence in depth against a misconfiguration). `LocalMode:Enabled` absent or `false` passes.
 Rules 9-10 run in the API host only (web app and `--smoke-check`), not in the ingestion console app.
+Rule 11 also runs in the API host only (web app and `--smoke-check`).
 
 Foundry inputs (D8, decided): the user supplies the Foundry project resource id (`foundryProjectResourceId`), the
 project endpoint (`foundryProjectEndpoint` -> `Foundry:ProjectEndpoint`) and the model resource id
@@ -137,6 +143,8 @@ access for embeddings). "Delete my data" needs no extra role: Data Contributor a
   like `Production`; echo enabled in `Production` throws; echo-only registry without `Foundry:ProjectEndpoint` starts;
   any non-echo workflow without it throws; `Chat:RetentionDays` unset starts in `Development` and throws in `Dev`,
   `Test`, `Production`; `0`, `3651` and a non-integer throw; budget `00:00:00` and `00:05:00` throw.
+- Rule 11: `LocalMode:Enabled=true` throws in `Development`, `Dev`, `Test` and `Production` (web app and
+  `--smoke-check`); a non-bool value (e.g. `yes`) throws; absent or `false` starts.
 - `ChatClientFactory` constructs `AIProjectClient` only with a `TokenCredential` (type-level: no overload with a key
   exists) and not before the first `Create`.
 - `--smoke-check` returns non-zero when Cosmos or Search reject the credential (stubbed responses).

@@ -8,13 +8,16 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:local": "vite --mode localdev",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "tsc --noEmit && vite build && node scripts/check-dist.mjs",
     "preview": "vite preview",
     "test:entrypoint": "sh scripts/test-entrypoint.sh",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:local": "playwright test -c playwright.local.config.ts",
+    "test:check-dist": "node scripts/check-dist.test.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "5.26.0",

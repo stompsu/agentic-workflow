@@ -6,8 +6,9 @@ using SupportChat.Core.Storage;
 namespace SupportChat.Infrastructure.Storage.InMemory;
 
 /// <summary>
-/// In-memory <see cref="ISessionStore"/> + <see cref="IMessageStore"/> for tests. Enforces userId exactly like the
-/// Cosmos partition key: every lookup is keyed by (userId, sessionId). Never registered by AddInfrastructure.
+/// In-memory <see cref="ISessionStore"/> + <see cref="IMessageStore"/> for tests and local mode (the LocalHost registers it
+/// as a singleton, ADR 0005 section 2). Enforces userId exactly like the Cosmos partition key: every lookup is keyed by
+/// (userId, sessionId). Never registered by AddInfrastructure.
 /// TTL: like Cosmos, sessions and messages carry <c>ttl</c> (RetentionDays * 86400, omitted when unset), counted from
 /// their last write by the injected TimeProvider; expired documents are invisible (a session that expires leaves its
 /// remaining messages behind as orphans, as in Cosmos).

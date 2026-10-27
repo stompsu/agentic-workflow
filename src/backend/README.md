@@ -56,6 +56,30 @@ Deployed environments (`Dev`, `Test`, `Production`) set the same keys as environ
 with `AZURE_CLIENT_ID` and no `Cosmos__Key` / `Search__Key` at all; the app refuses to start otherwise
 (ADR 0003 section 4).
 
+## LocalHost (local mode, no Azure)
+
+`src/SupportChat.LocalHost` is a separate executable that runs the same `/api` pipeline on a laptop with in-memory
+services (ADR 0005). It is not referenced by any other project, not published by `Dockerfile`, and excluded in `.dockerignore`.
+Run it with `node scripts/run-local.mjs` from the repo root (starts the frontend too), or only the backend:
+```bash
+dotnet run --project src/backend/src/SupportChat.LocalHost   # http://localhost:5080, Development
+```
+- Platform: `InMemoryChatStore` (sessions + messages, process lifetime), `InMemoryKnowledgeSearch` (BM25 over the repo
+  `knowledge/**/*.md`, copied to the output; chunk ids equal the Azure index), `LocalReadinessCheck`.
+- `LocalMode:Models`: `Scripted` (default, deterministic, no network) or `Foundry` (real `ChatClientFactory`,
+  `DefaultAzureCredential`, user-secrets `Foundry:ProjectEndpoint` + deployments; sends local chats to Foundry).
+- `LocalMode:Auth`: `Local` (default) issues ES256 JWTs from an in-memory key via `POST /local-auth/token {"user":"alice"}`
+  (outside `/api`, local only; a restart invalidates all tokens) and validates them like any bearer token; `Entra` uses the
+  production Entra validation with `AzureAd:*` from user-secrets.
+- Other keys: `LocalMode:LocalAuth:TokenLifetime` (01:00:00), `LocalMode:Scripted:TokenDelay` (00:00:00.030),
+  `LocalMode:Knowledge:SourcePath` (`knowledge`), `AllowedHosts` (`localhost;127.0.0.1;[::1]`).
+- Guards (startup fails otherwise): Development only; `LocalMode:Enabled=true`; none of `CONTAINER_APP_NAME`,
+  `CONTAINER_APP_REVISION`, `CONTAINER_APP_JOB_NAME`, `CONTAINER_APP_ENV_DNS_SUFFIX`, `WEBSITE_SITE_NAME`,
+  `KUBERNETES_SERVICE_HOST`, `DOTNET_RUNNING_IN_CONTAINER` set; loopback-only URLs (`*_PORTS` are rejected, checked before
+  `Build()` and again after start); loopback-only `AllowedHosts`; `--smoke-check` refused.
+- Config: the Api `appsettings.json` is linked as the base (`appsettings.Api.json`), then the LocalHost's own
+  `appsettings*.json`. The content root is the output directory.
+
 ## Tests
 
 `dotnet test src/backend` runs everything offline: Api.Tests uses the real JWT validation with a test signing key,
