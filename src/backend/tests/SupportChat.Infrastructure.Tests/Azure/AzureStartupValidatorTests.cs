@@ -328,6 +328,51 @@ public class AzureStartupValidatorTests
         Assert.Empty(Run(config, "Development"));
     }
 
+    // Rule 11 (ADR 0005 G5)
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Dev")]
+    [InlineData("Test")]
+    [InlineData("Production")]
+    [InlineData("production")]
+    [InlineData("Staging")]
+    public void LocalMode_enabled_fails_in_every_environment(string env)
+    {
+        var config = env.Equals("Production", StringComparison.OrdinalIgnoreCase) ? TestConfig.Production() : TestConfig.Development();
+        config["AZURE_CLIENT_ID"] = "id";
+        config["LocalMode:Enabled"] = "true";
+        Assert.Contains(Run(config, env), f => f.Contains("LocalMode:Enabled"));
+    }
+
+    [Theory]
+    [InlineData("TRUE")]
+    [InlineData(" true ")]
+    [InlineData("yes")]
+    [InlineData("1")]
+    public void LocalMode_true_or_non_bool_values_fail(string value)
+    {
+        var config = TestConfig.Development();
+        config["LocalMode:Enabled"] = value;
+        var failures = Run(config, "Development");
+        Assert.Contains(failures, f => f.Contains("LocalMode:Enabled"));
+        Assert.DoesNotContain(failures, f => f.Contains(value.Trim()) && !f.Contains("LocalMode:Enabled"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("false")]
+    [InlineData("False")]
+    public void LocalMode_absent_or_false_passes(string? value)
+    {
+        var dev = TestConfig.Development();
+        dev["LocalMode:Enabled"] = value;
+        Assert.Empty(Run(dev, "Development"));
+        var prod = TestConfig.Production();
+        prod["LocalMode:Enabled"] = value;
+        Assert.Empty(Run(prod, "Production"));
+    }
+
     [Fact]
     public void Failure_messages_never_contain_secret_values()
     {

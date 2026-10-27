@@ -145,6 +145,15 @@ public static class AzureStartupValidator
             failures.Add("Chat:DeleteUserDataBudget must be a time span between 00:00:05 and 00:03:00.");
         }
 
+        // Rule 11 (ADR 0005 G5): local mode exists only in the separate LocalHost executable; the API refuses the flag
+        // in every environment (Development included). Absent or false passes; any other value fails.
+        var localModeRaw = configuration["LocalMode:Enabled"];
+        if (!string.IsNullOrWhiteSpace(localModeRaw)
+            && (!bool.TryParse(localModeRaw.Trim(), out var localMode) || localMode))
+        {
+            failures.Add("LocalMode:Enabled must not be set to true (or any non-bool value): local mode is not available in the API; use the LocalHost executable.");
+        }
+
         return failures;
     }
 
