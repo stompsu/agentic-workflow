@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.Extensions.AI;
 using SupportChat.Core.Options;
 using SupportChat.Core.Storage;
+using SupportChat.Infrastructure.Storage.Cosmos;
 
 namespace SupportChat.Infrastructure.Storage.InMemory;
 
@@ -12,14 +13,26 @@ namespace SupportChat.Infrastructure.Storage.InMemory;
 /// their last write by the injected TimeProvider; expired documents are invisible (a session that expires leaves its
 /// remaining messages behind as orphans, as in Cosmos).
 /// </summary>
-public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptions? options = null) : ISessionStore, IMessageStore
+public sealed class InMemoryChatStore : ISessionStore, IMessageStore, IGuestStore
 {
     private const int DeleteChunkSize = 100;
 
     private readonly object _gate = new();
     private readonly Dictionary<(string User, string Session), State> _sessions = new();
     private readonly List<(string User, Stored Message)> _orphans = [];
-    private readonly ChatLimitsOptions _options = options ?? new ChatLimitsOptions();
+    private readonly ChatLimitsOptions _options;
+    private readonly RetentionPolicy _retention;
+    private readonly TimeProvider timeProvider;
+    private readonly Dictionary<string, GuestState> _guests = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _counters = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DateTimeOffset> _counterWrites = new(StringComparer.Ordinal);
+
+    public InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptions? options = null, GuestOptions? guest = null)
+    {
+        this.timeProvider = timeProvider;
+        _options = options ?? new ChatLimitsOptions();
+        _retention = new RetentionPolicy(_options.RetentionDays, (guest ?? new GuestOptions()).DataTtl);
+    }
 
     /// <summary>Test hook: runs after DELETE took the lock and before messages are removed (throw to simulate a crash).</summary>
     public Func<Task>? AfterDeleteLocked { get; set; }
@@ -32,7 +45,7 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
     {
         lock (_gate)
         {
-            _orphans.Add((userId, NewStored(message)));
+            _orphans.Add((userId, NewStored(userId, message)));
         }
     }
 
@@ -77,16 +90,114 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
         }
     }
 
-    public Task<SessionRecord> CreateAsync(string userId, string workflowId, string? title, CancellationToken ct)
+    /// <summary>Test hook: the guest document (null = guest ended).</summary>
+    public GuestRecord? GuestDocument(string guestUserId)
     {
-        var now = timeProvider.GetUtcNow();
-        var state = new State { Id = TurnRules.NewId(), WorkflowId = workflowId, Title = title, CreatedAt = now, UpdatedAt = now };
         lock (_gate)
         {
             Purge();
+            return _guests.TryGetValue(guestUserId, out var g) ? g.ToRecord() : null;
+        }
+    }
+
+    /// <summary>Test hook: removes only the guest document (as ttl expiry would).</summary>
+    public void RemoveGuestDocument(string guestUserId)
+    {
+        lock (_gate)
+        {
+            _guests.Remove(guestUserId);
+        }
+    }
+
+    /// <summary>Test hook: value of a counter window (0 when absent); also the number of counter increments made.</summary>
+    public long CounterValue(GuestCounter counter, DateTimeOffset window)
+    {
+        lock (_gate)
+        {
+            return _counters.GetValueOrDefault(CounterId(counter, window));
+        }
+    }
+
+    /// <summary>Test hook: number of IncrementCounterAsync calls so far (proves "no Cosmos write while closed").</summary>
+    public int CounterIncrementCalls { get; private set; }
+
+    public Task CreateAsync(GuestRecord guest, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Purge();
+            var now = timeProvider.GetUtcNow();
+            if (_guests.ContainsKey(guest.UserId))
+            {
+                throw new InvalidOperationException("Guest document already exists (409).");
+            }
+
+            _guests[guest.UserId] = new GuestState
+            {
+                UserId = guest.UserId,
+                CreatedAt = guest.CreatedAt,
+                ExpiresAt = guest.ExpiresAt,
+                TurnCount = guest.TurnCount,
+                MaxTurns = guest.MaxTurns,
+                SessionCount = guest.SessionCount,
+                MaxSessions = guest.MaxSessions,
+                LastWrite = now,
+            };
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task<GuestRecord?> GetAsync(string guestUserId, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Purge();
+            return Task.FromResult(_guests.TryGetValue(guestUserId, out var g) ? g.ToRecord() : null);
+        }
+    }
+
+    public Task<long> IncrementCounterAsync(GuestCounter counter, DateTimeOffset now, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Purge();
+            CounterIncrementCalls++;
+            var id = CounterId(counter, now);
+            _counters[id] = _counters.GetValueOrDefault(id) + 1;
+            _counterWrites[id] = timeProvider.GetUtcNow();
+            return Task.FromResult(_counters[id]);
+        }
+    }
+
+    private static string CounterId(GuestCounter counter, DateTimeOffset window) => CosmosGuestStore.CounterId(counter, window);
+
+    public Task<CreateSessionResult> CreateAsync(string userId, string workflowId, string? title, bool enforceGuestQuota, CancellationToken ct)
+    {
+        var now = timeProvider.GetUtcNow();
+        var state = new State { Id = TurnRules.NewId(), UserId = userId, WorkflowId = workflowId, Title = title, CreatedAt = now, UpdatedAt = now };
+        lock (_gate)
+        {
+            Purge();
+            if (enforceGuestQuota)
+            {
+                if (!_guests.TryGetValue(userId, out var guest))
+                {
+                    return Task.FromResult<CreateSessionResult>(new CreateSessionResult.GuestExpired());
+                }
+
+                if (guest.SessionCount >= guest.MaxSessions)
+                {
+                    return Task.FromResult<CreateSessionResult>(new CreateSessionResult.GuestQuotaExceeded());
+                }
+
+                guest.SessionCount++;
+                TouchGuest(guest, now);
+            }
+
             Touch(state, now);
             _sessions[(userId, state.Id)] = state;
-            return Task.FromResult(state.ToRecord());
+            return Task.FromResult<CreateSessionResult>(new CreateSessionResult.Created(state.ToRecord()));
         }
     }
 
@@ -241,12 +352,19 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
             {
                 _sessions.Remove((userId, id));
             }
+
+            // 3a. A guest's identity ends with its data: the guest document goes last (data-model 1.7).
+            if (GuestOptions.IsGuestId(userId))
+            {
+                _guests.Remove(userId);
+            }
         }
 
         return Task.FromResult(DeleteUserDataResult.Completed);
     }
 
-    public Task<StartTurnResult> TryStartTurnAsync(string userId, string sessionId, MessageRecord userMessage, CancellationToken ct)
+    public Task<StartTurnResult> TryStartTurnAsync(
+        string userId, string sessionId, MessageRecord userMessage, bool enforceGuestQuota, CancellationToken ct)
     {
         TurnRules.EnsureUserMessage(sessionId, userMessage);
         lock (_gate)
@@ -263,13 +381,29 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
                 return Task.FromResult<StartTurnResult>(new StartTurnResult.Busy());
             }
 
+            if (enforceGuestQuota)
+            {
+                if (!_guests.TryGetValue(userId, out var guest))
+                {
+                    return Task.FromResult<StartTurnResult>(new StartTurnResult.GuestExpired());
+                }
+
+                if (guest.TurnCount >= guest.MaxTurns)
+                {
+                    return Task.FromResult<StartTurnResult>(new StartTurnResult.GuestQuotaExceeded());
+                }
+
+                guest.TurnCount++;
+                TouchGuest(guest, now);
+            }
+
             var lease = new TurnLease(sessionId, TurnRules.NewId(), TurnRules.NewId(), now);
             state.ActiveTurnId = lease.LeaseId;
             state.ActiveTurnStartedAt = now;
             state.UpdatedAt = now;
             state.MessageCount++;
             state.Title ??= TurnRules.AutoTitle(userMessage.Content);
-            state.Messages.Add(NewStored(userMessage));
+            state.Messages.Add(NewStored(userId, userMessage));
             Touch(state, now);
             return Task.FromResult<StartTurnResult>(new StartTurnResult.Started(lease));
         }
@@ -297,7 +431,7 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
                     throw new ArgumentException("The message does not belong to the lease's session.", nameof(assistantMessage));
                 }
 
-                state.Messages.Add(NewStored(assistantMessage));
+                state.Messages.Add(NewStored(userId, assistantMessage));
                 state.MessageCount++;
             }
 
@@ -348,16 +482,16 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
     private static List<MessageRecord> Ordered(State state) =>
         state.Messages.Select((m, i) => (m, i)).OrderBy(x => x.m.Record.CreatedAt).ThenBy(x => x.i).Select(x => x.m.Record).ToList();
 
-    private int? Ttl() => TurnRules.TtlSeconds(_options.RetentionDays);
-
-    private Stored NewStored(MessageRecord record) => new(record, Ttl(), timeProvider.GetUtcNow());
+    private Stored NewStored(string userId, MessageRecord record) => new(record, _retention.TtlSeconds(userId), timeProvider.GetUtcNow());
 
     /// <summary>Every session write refreshes ttl and the write time (Cosmos counts ttl from the last write).</summary>
     private void Touch(State state, DateTimeOffset now)
     {
-        state.Ttl = Ttl();
+        state.Ttl = _retention.TtlSeconds(state.UserId);
         state.LastWrite = now;
     }
+
+    private void TouchGuest(GuestState guest, DateTimeOffset now) => guest.LastWrite = now;
 
     /// <summary>Removes expired documents (Cosmos hides them immediately). Call under the lock.</summary>
     private void Purge()
@@ -375,6 +509,23 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
         }
 
         _orphans.RemoveAll(o => o.Message.Expired(now));
+
+        foreach (var (id, guest) in _guests.ToList())
+        {
+            if (now >= guest.LastWrite + TimeSpan.FromSeconds(_retention.GuestTtlSeconds))
+            {
+                _guests.Remove(id);
+            }
+        }
+
+        foreach (var (id, counter) in _counterWrites.ToList())
+        {
+            if (now >= counter + TimeSpan.FromSeconds(172800))
+            {
+                _counterWrites.Remove(id);
+                _counters.Remove(id);
+            }
+        }
     }
 
     private sealed record Stored(MessageRecord Record, int? Ttl, DateTimeOffset WrittenAt)
@@ -382,9 +533,32 @@ public sealed class InMemoryChatStore(TimeProvider timeProvider, ChatLimitsOptio
         public bool Expired(DateTimeOffset now) => Ttl is { } ttl && now >= WrittenAt + TimeSpan.FromSeconds(ttl);
     }
 
+    private sealed class GuestState
+    {
+        public required string UserId { get; init; }
+
+        public DateTimeOffset CreatedAt { get; init; }
+
+        public DateTimeOffset ExpiresAt { get; init; }
+
+        public int TurnCount { get; set; }
+
+        public int MaxTurns { get; init; }
+
+        public int SessionCount { get; set; }
+
+        public int MaxSessions { get; init; }
+
+        public DateTimeOffset LastWrite { get; set; }
+
+        public GuestRecord ToRecord() => new(UserId, CreatedAt, ExpiresAt, TurnCount, MaxTurns, SessionCount, MaxSessions);
+    }
+
     private sealed class State
     {
         public required string Id { get; init; }
+
+        public required string UserId { get; init; }
 
         public required string WorkflowId { get; init; }
 

@@ -9,6 +9,8 @@ internal static class DocumentTypes
 {
     public const string Session = "session";
     public const string Message = "message";
+    public const string Guest = "guest";
+    public const string GuestCounter = "guestCounter";
     public const string Active = "active";
     public const string Deleting = "deleting";
     public const int SchemaVersion = 1;
@@ -132,4 +134,63 @@ internal sealed class MessageDoc
         Citations ?? [],
         ErrorCode,
         WorkflowMetadata);
+}
+
+/// <summary>Guest document (data-model 1.8): one per guest partition, id "guest". Never returned by the API.</summary>
+internal sealed class GuestDoc
+{
+    public const string DocumentId = "guest";
+
+    public string Id { get; set; } = DocumentId;
+
+    public string Type { get; set; } = DocumentTypes.Guest;
+
+    public required string UserId { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public DateTimeOffset ExpiresAt { get; set; }
+
+    public int TurnCount { get; set; }
+
+    public int MaxTurns { get; set; }
+
+    public int SessionCount { get; set; }
+
+    public int MaxSessions { get; set; }
+
+    public int SchemaVersion { get; set; } = DocumentTypes.SchemaVersion;
+
+    public int? Ttl { get; set; }
+
+    public static GuestDoc From(GuestRecord g, int ttl) => new()
+    {
+        UserId = g.UserId,
+        CreatedAt = g.CreatedAt,
+        ExpiresAt = g.ExpiresAt,
+        TurnCount = g.TurnCount,
+        MaxTurns = g.MaxTurns,
+        SessionCount = g.SessionCount,
+        MaxSessions = g.MaxSessions,
+        Ttl = ttl,
+    };
+
+    public GuestRecord ToRecord() => new(UserId, CreatedAt, ExpiresAt, TurnCount, MaxTurns, SessionCount, MaxSessions);
+}
+
+/// <summary>Global guest counter window (data-model 1.8) in the reserved partition.</summary>
+internal sealed class GuestCounterDoc
+{
+    public const string PartitionValue = "system-guest-counter";
+    public const int TtlSeconds = 172800;
+
+    public required string Id { get; set; }
+
+    public string Type { get; set; } = DocumentTypes.GuestCounter;
+
+    public string UserId { get; set; } = PartitionValue;
+
+    public long Count { get; set; }
+
+    public int Ttl { get; set; } = TtlSeconds;
 }

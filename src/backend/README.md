@@ -56,9 +56,25 @@ Deployed environments (`Dev`, `Test`, `Production`) set the same keys as environ
 with `AZURE_CLIENT_ID` and no `Cosmos__Key` / `Search__Key` at all; the app refuses to start otherwise
 (ADR 0003 section 4).
 
+## Guest access (ADR 0006)
+
+Off by default (`Guest:Enabled=false`). When on, `POST /api/guest/token` issues one ES256 JWT per guest
+(`oid = guest-<guid>`), validated by a second JwtBearer scheme behind the `ApiBearer` policy scheme. Keys: in
+`Development` set `Guest:SigningMode=Ephemeral` (in-process key, already in `appsettings.Development.json`); in every
+other environment `Guest:SigningMode=KeyVault` with a versionless `Guest:SigningKeyUri`; the app identity needs
+"Key Vault Crypto User" on that vault (`--smoke-check` reports a 403 with that role name). No keys or secrets: Key Vault
+is always reached with the app's `TokenCredential`. Full key list and startup rules: ADR 0006 section 11, ADR 0003
+rules 12-17. `Guest:DataTtl` is range-checked even while guests are disabled.
+
+Opt-in V1 check against a real dev vault (never in CI): `GUEST_V1_KEY_URI=https://<vault>.vault.azure.net/keys/guest-token-signing
+dotnet test src/backend --filter VaultRoundTrip` after `az login`.
+
 ## Tests
 
 `dotnet test src/backend` runs everything offline: Api.Tests uses the real JWT validation with a test signing key,
 the real endpoints and an in-memory store that enforces `userId`. Cosmos emulator tests
 (`Infrastructure.Tests/Storage/CosmosEmulatorTests.cs`) are skipped unless the emulator answers at
-`COSMOS_EMULATOR_ENDPOINT` (default `https://localhost:8081/`).
+`COSMOS_EMULATOR_ENDPOINT` (default `https://localhost:8081/`). They include the guest quota batch check (V3,
+`V3_batch_patch_with_filter_predicate_...`). On Apple Silicon the Linux emulator runs under amd64 emulation:
+`docker run -d --name cosmos-emu -p 8081:8081 -p 10250-10255:10250-10255 --platform linux/amd64 mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest`
+(wait until `curl -sk https://localhost:8081/` answers 401; it can crash after a while, restart it).

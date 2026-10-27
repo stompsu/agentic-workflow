@@ -17,6 +17,20 @@ for f in "${files[@]}"; do
       echo "ERROR: $p is empty in $f" >&2; bad=1
     fi
   done
+  # Guest access (ADR 0006): the signing key alert needs an operator address whenever guests are enabled.
+  if grep -qE "^[[:space:]]*param[[:space:]]+guestAccessEnabled[[:space:]]*=[[:space:]]*true" "$f"; then
+    mail="$(sed -nE "s/^[[:space:]]*param[[:space:]]+alertEmail[[:space:]]*=[[:space:]]*'([^']*)'.*/\1/p" "$f" | head -n1)"
+    if [ -z "$mail" ] || [[ "$mail" == *REPLACE_ME* ]]; then
+      echo "ERROR: guestAccessEnabled = true needs a real alertEmail in $f (empty or placeholder)" >&2; bad=1
+    fi
+    # Prod guard (mirrors the fail() in main.bicep): guests in prod need the explicit precondition acknowledgement.
+    case "$f" in *prod*)
+      if ! grep -qE "^[[:space:]]*param[[:space:]]+guestProdPreconditionsAck[[:space:]]*=[[:space:]]*true" "$f"; then
+        echo "ERROR: guestAccessEnabled = true in $f needs guestProdPreconditionsAck = true (requires G7 CAPTCHA and the prod Key Vault Crypto User role, ADR 0006)" >&2; bad=1
+      fi;;
+    esac
+  fi
 done
+bash "$dir/scripts/check-bool-env.sh" || bad=1
 [ $bad -eq 0 ] && echo "check-params: OK"
 exit $bad

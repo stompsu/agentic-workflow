@@ -7,7 +7,8 @@ public static class RequestBody
 {
     public const int MaxBytes = 32 * 1024;
 
-    public static async Task<(T? Value, IResult? Error)> ReadJsonAsync<T>(HttpContext context)
+    /// <param name="whenEmpty">When set, an empty body yields this value instead of a 400 (optional bodies).</param>
+    public static async Task<(T? Value, IResult? Error)> ReadJsonAsync<T>(HttpContext context, T? whenEmpty = null)
         where T : class
     {
         if (!context.Request.HasJsonContentType())
@@ -34,6 +35,11 @@ public static class RequestBody
 
         try
         {
+            if (buffer.Length == 0 && whenEmpty is not null)
+            {
+                return (whenEmpty, null);
+            }
+
             var value = buffer.Length == 0 ? null : JsonSerializer.Deserialize<T>(buffer.ToArray(), ApiJson.Options);
             return value is null ? (null, Problems.Validation("body", "A JSON object body is required.")) : (value, null);
         }

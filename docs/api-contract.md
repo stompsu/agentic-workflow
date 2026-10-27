@@ -2,6 +2,9 @@
 
 Status: v1 (Phase 0, revised 2026-10-25 after the second qa-reviewer pass; D7 additions 2026-10-25: `DELETE /api/me/data`,
 503 `deletion_incomplete`, retention notes). All D7 additions are additive (no version bump).
+Guest access additions 2026-10-27 (ADR 0006, accepted): `POST /api/guest/token` (2.9), codes `guest_access_disabled`,
+`guest_expired`, `guest_quota_exceeded`, `bot_check_failed`, and amendments to sections 1, 2.8, 3, 5, 6 and 7. All
+additive or clarifications (no version bump); SSE (section 4) is unchanged.
 Change this file FIRST, then backend and frontend.
 Owners: architect (contract), backend-dotnet (server), frontend-react (client), qa-reviewer (compliance).
 
@@ -14,10 +17,15 @@ Owners: architect (contract), backend-dotnet (server), frontend-react (client), 
   ISO 8601 UTC (`2026-10-25T10:15:30.123Z`), ids are lowercase GUID strings (server-generated, version 7 so they sort by time).
 - Clients MUST ignore unknown JSON properties (additive changes are non-breaking). Removing or renaming a field,
   event or code is breaking and needs a contract version bump.
-- Auth: every endpoint except health requires `Authorization: Bearer <access token>` for scope
-  `api://<api-client-id>/access_as_user` issued by the Entra External ID tenant (see /docs/adr/0001-identity-flow.md).
-- The user is ALWAYS the `oid` claim of the validated token. No endpoint accepts a user id in the route, query or body.
+- Auth: every endpoint except health and `POST /api/guest/token` requires `Authorization: Bearer <access token>`. Two
+  token kinds are accepted: (1) an Entra External ID access token for scope `api://<api-client-id>/access_as_user`
+  (/docs/adr/0001-identity-flow.md); (2) when guest access is enabled in the environment, a guest token issued by
+  `POST /api/guest/token` (/docs/adr/0006-guest-access.md). Clients treat both as opaque strings.
+- The user is ALWAYS the `oid` claim of the validated token (an Entra object id, or a guest id for guest tokens).
+  No endpoint accepts a user id in the route, query or body.
   No response contains `userId`, `ttl`, `activeTurn`, `state` or `workflowMetadata`.
+- Guests: a guest is a user with no account. Every endpoint behaves the same for guests unless stated otherwise in
+  2.9. Responses never say whether the caller is a guest; the client knows which token it holds.
 - Workflow-agnostic: no endpoint, field or event is specific to a workflow type. Workflows are data (`GET /api/workflows`).
 - Retention: chat data expires automatically (`Chat:RetentionDays`, data-model 1.3). The API exposes no retention
   value or expiry time; clients must tolerate sessions disappearing from the list and old messages disappearing from
@@ -36,6 +44,7 @@ Owners: architect (contract), backend-dotnet (server), frontend-react (client), 
 | POST | `/api/sessions/{sessionId}/messages` | user | 200 `text/event-stream` | Send a user message, stream the assistant turn (SSE). |
 | DELETE | `/api/sessions/{sessionId}` | user | 204 | Hard-delete session and all its messages. |
 | DELETE | `/api/me/data` | user | 204 | Delete ALL chat data (every session and message) of the caller. Idempotent. Section 2.8. |
+| POST | `/api/guest/token` | none | 200 | Create a guest identity and return its only token. Section 2.9. |
 
 `/api/healthz` is the pipeline smoke-test target (`https://<frontend fqdn>/api/healthz`). Health responses:
 `{"status":"ok"}` or `{"status":"unavailable"}` (503). They never include config, dependency versions or errors.
@@ -190,15 +199,15 @@ External ID user account; that is a separate manual admin step (/docs/auth-setup
 
 Request:
 - `DELETE /api/me/data`, no query parameters, no body (a body, if sent, is ignored; no `Content-Type` required).
-- Auth exactly like every other endpoint: bearer token with scope `access_as_user` and an `oid` claim
-  (401 `unauthorized` / 403 `forbidden`, section 3). The data deleted is ALWAYS the token's `oid` partition; `me` is
-  not an id and no other user can be addressed.
+- Auth exactly like every other endpoint (section 1): an Entra token with scope `access_as_user` and an `oid` claim,
+  or a guest token (401 `unauthorized` / 403 `forbidden`, section 3). The data deleted is ALWAYS the token's `oid`
+  partition; `me` is not an id and no other user can be addressed.
 
 Responses:
 
 | status | body | Meaning |
 |---|---|---|
-| 204 | none | Everything of the caller that existed when the request started is deleted. Also returned when there was nothing to delete. Repeating the call returns 204 again (idempotent). |
+| 204 | none | Everything of the caller that existed when the request started is deleted. Also returned when there was nothing to delete. Repeating the call returns 204 again (idempotent). For a guest, also ends the guest identity (2.9). Calling it again with the same guest token after the guest has ended still returns 204. |
 | 503 | ProblemDetails `code: deletion_incomplete`, header `Retry-After: 1` | The server time budget (`Chat:DeleteUserDataBudget`, default `00:01:00`) ran out before everything was deleted. Progress is kept: sessions already marked stay invisible, deleted documents stay deleted; some data may still be visible until the request is repeated. The client repeats the same request. |
 | 401 / 403 | ProblemDetails `unauthorized` / `forbidden` | Section 3. |
 | 500 | ProblemDetails `internal_error` | Unexpected failure. Progress is kept; repeating the request resumes. |
@@ -247,12 +256,64 @@ Client (SPA):
   if configured (auth-setup section 7). The user stays signed in.
 - Other errors: the generic error handling (401 retry/login, 5xx message).
 
+### 2.9 Guest access
+
+Available only when the environment enables it (`Guest:Enabled`). When disabled, `POST /api/guest/token` returns 404
+`guest_access_disabled` and guest tokens are rejected with 401 `unauthorized`.
+
+**POST /api/guest/token**
+
+Request headers: `Content-Type: application/json` (required; other types -> 415), no `Authorization`.
+Body: `{}`. When bot protection is enabled (decision G7): `{ "botCheckToken": "<provider token>" }`.
+Unknown properties are ignored.
+
+Response 200 (`Cache-Control: no-store`):
+```json
+{ "accessToken": "<jwt>", "tokenType": "Bearer", "expiresAt": "2026-10-27T14:15:00.000Z" }
+```
+- `expiresAt`: when the token AND the guest identity end (default 4 h after issue). There is no refresh; after this
+  time the guest is gone.
+- The guest starts with no sessions. Every call creates a NEW guest; there is no way to return to an earlier guest.
+
+Errors: 404 `guest_access_disabled`; 415 `unsupported_media_type`; 429 `rate_limited` + `Retry-After` (per-client
+or global guest-creation limit); 400 `bot_check_failed` (only when bot protection is enabled); 500 `internal_error`
+(for example, the signing service is unavailable).
+
+**Guest behavior on other endpoints**
+- Any endpoint: 401 `guest_expired` when the guest token has expired or the guest identity was ended by
+  `DELETE /api/me/data` (writes: immediately; other requests: within about one minute). Exception:
+  `DELETE /api/me/data` returns 204 for an ended guest.
+- `GET /api/workflows` returns only the workflows enabled for guests (possibly fewer than for signed-in users).
+  `POST /api/sessions` with a workflow not enabled for guests returns 400 `validation_failed`, like an unknown id.
+  A guest session whose workflow is no longer enabled for guests returns 409 `workflow_unavailable` on POST messages.
+- `POST /api/sessions`: each guest may create at most `Guest:MaxSessions` sessions in its lifetime (deleting one does
+  not give it back). Beyond that: 429 `guest_quota_exceeded` WITHOUT `Retry-After`.
+- `POST /api/sessions/{id}/messages`: the per-user limiter is stricter for guests (`Guest:TurnsPerMinute`, 429
+  `rate_limited` + `Retry-After`). Global guest-turn caps per hour and per day apply to all guests together (429
+  `rate_limited` + `Retry-After` until the window ends). Each guest also has a total turn quota (`Guest:MaxTurns`);
+  when it is used up the response is 429 `guest_quota_exceeded` WITHOUT `Retry-After`, and nothing is persisted. A
+  turn counts against the quota once the server has accepted it (turn lock taken and user message stored, 2.6),
+  whatever happens afterwards: completed, failed, cancelled, or an error before the `session` event. Requests
+  rejected before that point (validation, limits, `turn_in_progress`, `not_found`) do not count.
+- `DELETE /api/me/data` for a guest deletes all the guest's chat data AND ends the guest identity. 204/503 as in 2.8.
+- Guest data expires `Guest:DataTtl` (default 4 h 15 min) after it was last written.
+
+Client (SPA): stores the guest token in `sessionStorage` (ADR 0006 section 4); ends guest mode at `expiresAt`; on
+401 `guest_expired` does not retry, clears the token and shows the login page with a notice; on 401 `unauthorized`
+in guest mode retries once after 1 s with the same token, then ends guest mode; treats `guest_quota_exceeded` as
+"disable sending (or new chats), offer sign-in". It never sends the guest token anywhere except `/api`.
+
+`isGuest` in responses: not added. There is no `/api/me` endpoint; the SPA knows its token kind.
+
 ## 3. Status codes for ownership
 
 - 401: missing/invalid/expired token. Header `WWW-Authenticate: Bearer`, body ProblemDetails `code: unauthorized`
   (custom JwtBearer challenge). Client: acquire token silently with force refresh, retry once, then redirect to login.
-- 403: valid token but missing the `access_as_user` scope or missing `oid` (for example an app-only token).
-  Body ProblemDetails `code: forbidden`. 403 is never used for resources.
+  For guest tokens, 401 `guest_expired` means the guest identity has ended (maximum lifetime reached or data
+  deleted). The client must NOT retry; it goes back to the login page. A guest token has no refresh.
+- 403: valid token that is not a chat user: an Entra token missing the `access_as_user` scope or a valid GUID `oid`
+  (for example an app-only token), or a guest token whose `oid` is not a guest id. Body ProblemDetails
+  `code: forbidden`. 403 is never used for resources.
 - 404: session id unknown OR owned by another user (OR being deleted, OR expired). Responses are identical except
   `traceId`. Never 403. (Implementation: every read is `(id, partitionKey = oid)`; another user's session is simply
   not found.) `DELETE /api/me/data` never returns 404.
@@ -433,14 +494,18 @@ Clients switch on `code` only; `type`/`title` are informational (ASP.NET Core de
 | status | code | When |
 |---|---|---|
 | 400 | `validation_failed` | Bad body/query, unknown `workflowId`, bad continuation token. `errors` lists fields. |
+| 400 | `bot_check_failed` | `POST /api/guest/token` with a missing or rejected bot-check token (only when bot protection is enabled). |
 | 401 | `unauthorized` | No/invalid token. |
-| 403 | `forbidden` | Token lacks scope or `oid`. |
+| 401 | `guest_expired` | Guest token expired or guest identity ended. Client: no retry; go to the login page. |
+| 403 | `forbidden` | Entra token lacks the scope or a valid `oid`; guest token with an invalid guest id. |
 | 404 | `not_found` | Unknown, foreign, being-deleted or expired session. |
+| 404 | `guest_access_disabled` | `POST /api/guest/token` when guest access is disabled in this environment. |
 | 409 | `turn_in_progress` | Another turn is active for this session (POST messages, DELETE session). Never returned by `DELETE /api/me/data`. |
 | 409 | `workflow_unavailable` | Session's `workflowId` is no longer registered. Client: show the session read-only with a notice and offer a new chat. |
 | 413 | `payload_too_large` | Body > 32 KB (backend). |
-| 415 | `unsupported_media_type` | Not `application/json`. |
-| 429 | `rate_limited` | Our per-user limiter on POST messages (keyed by `oid`, per replica; header `Retry-After` in seconds). Client: disable sending until `Retry-After` elapses. |
+| 415 | `unsupported_media_type` | Not `application/json`. Also `POST /api/guest/token` (for consistency with the other JSON endpoints). |
+| 429 | `rate_limited` | Per-user limiter on POST messages (keyed by `oid`, per replica; guests have a lower limit), the guest-creation limits on `POST /api/guest/token` (per client address and per environment), and the global guest-turn caps on POST messages (per environment). Header `Retry-After` in seconds. Client: disable the action until `Retry-After` elapses. |
+| 429 | `guest_quota_exceeded` | Guest used up its session or turn quota. No `Retry-After`. Client: disable the action, offer sign-in. |
 | 500 | `internal_error` | Unhandled, incl. a failure after turn start but before the `session` event (lock released, 2.6). No details in production. |
 | 503 | `deletion_incomplete` | `DELETE /api/me/data` ran out of its time budget; progress kept; header `Retry-After: 1`. Client repeats the request (2.8). |
 
@@ -464,6 +529,14 @@ ProblemDetails with that `code`.
 | Per-user turns | 10 per minute per replica (`Chat:TurnsPerMinute`); effective limit scales with replica count |
 | Delete-my-data time budget per request | `00:01:00` (`Chat:DeleteUserDataBudget`, 00:00:05..00:03:00) |
 | Retention | `Chat:RetentionDays` per environment; defaults dev 30, test 30, prod 90 (data-model 1.3) |
+| Guest identity and token lifetime | 4 h (`Guest:MaxLifetime`) |
+| Guest data TTL | 4 h 15 min after last write (`Guest:DataTtl`) |
+| Guest turns per minute | 5 per replica (`Guest:TurnsPerMinute`) |
+| Guest total turns | 30 per guest (`Guest:MaxTurns`) |
+| Guest sessions | 5 per guest (`Guest:MaxSessions`) |
+| Guest creations per client address | 10 per hour per replica (`Guest:CreationsPerClientPerHour`) |
+| Guest creations per environment | 200 per hour (`Guest:MaxCreationsPerHour`) |
+| Guest turns per environment (all guests together) | 300 per hour (`Guest:MaxTurnsPerHour`) and 2,000 per day (`Guest:MaxTurnsPerDay`) |
 
 ## 7. Infrastructure requirements implied by this contract
 
@@ -471,6 +544,9 @@ ProblemDetails with that `code`.
   `proxy_set_header Host <backend internal fqdn>` (Container Apps routes by Host), `proxy_http_version 1.1`,
   `proxy_set_header Connection ""`, `proxy_buffering off`, `proxy_cache off`, `gzip off` for `text/event-stream`,
   `proxy_read_timeout 300s`, pass `Authorization` through. No other backend paths are proxied.
+- nginx sets `X-Client-Ip` in `location /api/` only (overwriting any client value) to the rightmost `X-Forwarded-For`
+  entry received from the Container Apps ingress; the backend uses only this header, and only for the guest-creation
+  limit (ADR 0006 section 9.4).
 - Vite dev server (local only): `server.proxy['/api']` to the local backend, no buffering of `text/event-stream`.
 - Backend: no response compression for `text/event-stream` (exclude the SSE route if compression middleware is added).
 - Container Apps HTTP ingress request timeout is 240 s; the turn timeout (180 s) and the delete-my-data budget (60 s)

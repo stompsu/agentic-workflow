@@ -119,3 +119,9 @@ body { background: var(--bg); color: var(--text); }
 .modal { background: var(--panel); color: var(--text); border-radius: 10px; padding: 1.5rem; max-width: 30rem; width: 100%; }
 .modal h2 { margin-top: 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+
+.guest-option { margin-top: 1rem; }
+.divider { display: flex; align-items: center; gap: 0.75rem; color: var(--muted); font-size: 0.875rem; margin: 0 0 0.75rem; }
+.divider::before, .divider::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.guest-badge { background: #fff4d6; color: #5c4400; border: 1px solid #e8cf85; border-radius: 999px; padding: 0.125rem 0.625rem; font-size: 0.8125rem; font-weight: 600; cursor: help; }
+.provider-choices { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }

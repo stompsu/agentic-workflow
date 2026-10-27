@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, describeApiError } from '../api/errors';
+import { ApiError, GUEST_LIMIT_TEXT, describeApiError } from '../api/errors';
+import { useGuestLimits } from '../chat/guestLimits';
 import { useApi } from '../api/ApiContext';
 import { isTurnActive } from '../chat/turnReducer';
 import { useChatTurn } from '../chat/useChatTurn';
@@ -22,6 +23,7 @@ const STOP_FINALIZE_DELAY_MS = 1500;
 export function ChatView({ sessionId, onSessionCreated, onNewChat }: Props) {
   const api = useApi();
   const qc = useQueryClient();
+  const limits = useGuestLimits();
   const turn = useChatTurn(api);
   const { state, send, reset, settle } = turn;
 
@@ -75,6 +77,7 @@ export function ChatView({ sessionId, onSessionCreated, onNewChat }: Props) {
       const result = await send(id, content);
       if (token !== finalizeToken.current) return; // a newer turn took over
       if (result.apiError?.code === 'workflow_unavailable') setUnavailable(true);
+      if (result.apiError?.code === 'guest_quota_exceeded') limits.report('turns');
       if (!result.accepted) return; // keep the pending bubble + error so the user can retry
       if (result.outcome === 'stopped') {
         // The server persists the partial reply a moment after the abort.
@@ -87,7 +90,7 @@ export function ChatView({ sessionId, onSessionCreated, onNewChat }: Props) {
       if (result.outcome === 'done') reset();
       else settle();
     },
-    [send, reset, settle, refreshHistory],
+    [send, reset, settle, refreshHistory, limits],
   );
 
   async function handleSend(content: string) {
@@ -103,6 +106,11 @@ export function ChatView({ sessionId, onSessionCreated, onNewChat }: Props) {
         void qc.invalidateQueries({ queryKey: queryKeys.sessions });
       } catch (e) {
         // The draft stays in the composer; Retry re-sends it.
+        if (e instanceof ApiError && e.code === 'guest_quota_exceeded') {
+          limits.report('sessions'); // "New chat" and this composer are disabled with the guest limit text
+          setCreating(false);
+          return;
+        }
         setLocalError({ message: e instanceof ApiError ? describeApiError(e) : 'Something went wrong. Please try again.', content });
         setCreating(false);
         return;
@@ -137,9 +145,12 @@ export function ChatView({ sessionId, onSessionCreated, onNewChat }: Props) {
   const currentAgent = state.segments.at(-1)?.agentName;
   const workflowName = session ? (workflows.find((w) => w.id === session.workflowId)?.displayName ?? session.workflowId) : null;
 
+  const limitReached = limits.turnsExhausted || (sessionId === null && limits.sessionsExhausted);
   const disabledReason = readOnly
     ? undefined
-    : blockedSeconds > 0
+    : limitReached
+      ? GUEST_LIMIT_TEXT
+      : blockedSeconds > 0
       ? `Sending is paused for ${blockedSeconds} s because you are sending too quickly.`
       : undefined;
 
@@ -203,7 +214,7 @@ export function ChatView({ sessionId, onSessionCreated, onNewChat }: Props) {
         {statusText}
       </div>
 
-      {error && error.code !== 'workflow_unavailable' && (
+      {error && error.code !== 'workflow_unavailable' && error.code !== 'guest_quota_exceeded' && (
         <div role="alert" className="banner banner-error">
           <span>
             {error.message}
@@ -241,7 +252,7 @@ export function ChatView({ sessionId, onSessionCreated, onNewChat }: Props) {
         <Composer
           value={draft}
           onChange={setDraft}
-          disabled={creating || blockedSeconds > 0 || (sessionId === null && !workflowId)}
+          disabled={creating || blockedSeconds > 0 || limitReached || (sessionId === null && !workflowId)}
           disabledReason={disabledReason}
           busy={active}
           onSend={(c) => void handleSend(c)}

@@ -8,7 +8,8 @@
     "providers": [
       { "id": "google", "label": "Continue with Google", "domainHint": "google" },
       { "id": "facebook", "label": "Continue with Facebook", "domainHint": "facebook" }
-    ]
+    ],
+    "guest": { "enabled": false, "label": "Continue as guest" }
   },
   "app": { "title": "Assistant", "tagline": "Sign in to continue." },
   "apiBaseUrl": "/api"

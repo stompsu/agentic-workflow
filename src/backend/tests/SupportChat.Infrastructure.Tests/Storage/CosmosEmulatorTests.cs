@@ -6,6 +6,7 @@ using Microsoft.Extensions.Time.Testing;
 using SupportChat.Core.Options;
 using SupportChat.Core.Serialization;
 using SupportChat.Core.Storage;
+using SupportChat.Infrastructure.Storage;
 using SupportChat.Infrastructure.Storage.Cosmos;
 
 namespace SupportChat.Infrastructure.Tests.Storage;
@@ -130,9 +131,15 @@ public class CosmosStoreEmulatorTests : IClassFixture<CosmosEmulatorFixture>
         {
             _container = container;
             var chat = new CosmosChatContainer(container);
-            Sessions = new CosmosSessionStore(chat, Options.Create(new ChatLimitsOptions()), _time);
+            Sessions = new CosmosSessionStore(chat, Options.Create(new ChatLimitsOptions()), _time, new RetentionPolicy(null, TimeSpan.FromMinutes(255)));
             Messages = new CosmosMessageStore(chat);
+            Guests = new CosmosGuestStore(chat, new RetentionPolicy(null, TimeSpan.FromMinutes(255)));
         }
+
+        protected override IGuestStore Guests { get; }
+
+        protected override async Task RemoveGuestDocumentAsync(string guestUserId) =>
+            await _container.DeleteItemAsync<GuestDoc>(GuestDoc.DocumentId, new PartitionKey(guestUserId));
 
         protected override ISessionStore Sessions { get; }
 
@@ -261,7 +268,7 @@ public class CosmosStoreEmulatorTests : IClassFixture<CosmosEmulatorFixture>
         {
             var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
             var chat = new CosmosChatContainer(_fixture.Container!);
-            var store = new CosmosSessionStore(chat, Options.Create(new ChatLimitsOptions { RetentionDays = days }), time);
+            var store = new CosmosSessionStore(chat, Options.Create(new ChatLimitsOptions { RetentionDays = days }), time, new RetentionPolicy(days, TimeSpan.FromMinutes(255)));
             var user = Guid.NewGuid().ToString();
             var pk = new PartitionKey(user);
             var expected = days is null ? null : (int?)(days * 86400);
@@ -309,5 +316,122 @@ public class CosmosStoreEmulatorTests : IClassFixture<CosmosEmulatorFixture>
     }
 
     [EmulatorFact]
+    public Task Guest_document_roundtrip() => new Contract(_fixture.Container!).Guest_document_roundtrips_and_an_unknown_guest_is_null();
+
+    [EmulatorFact]
+    public Task Guest_session_quota() => new Contract(_fixture.Container!).Guest_session_quota_stops_at_max_sessions_and_persists_nothing_beyond_it();
+
+    [EmulatorFact]
+    public Task Guest_turn_quota() => new Contract(_fixture.Container!).Guest_turn_quota_stops_at_max_turns_and_persists_nothing_beyond_it();
+
+    [EmulatorFact]
+    public Task Guest_without_document_is_expired() => new Contract(_fixture.Container!).Guest_without_a_document_is_GuestExpired_and_nothing_is_written();
+
+    [EmulatorFact]
+    public Task Guest_quota_not_consumed_by_busy_or_not_found() => new Contract(_fixture.Container!).Guest_turn_quota_is_not_consumed_by_Busy_or_NotFound();
+
+    [EmulatorFact]
+    public Task Social_user_is_not_quota_limited() => new Contract(_fixture.Container!).A_social_user_is_never_subject_to_a_guest_quota_when_enforcement_is_off();
+
+    [EmulatorFact]
+    public Task Guest_A_guest_B_social_isolation() => new Contract(_fixture.Container!).Guest_A_guest_B_and_a_social_user_cannot_see_or_touch_each_other();
+
+    [EmulatorFact]
+    public Task Guest_delete_all_removes_guest_document_last() => new Contract(_fixture.Container!).DeleteAll_for_a_guest_removes_the_guest_document_last_and_can_be_repeated();
+
+    [EmulatorFact]
+    public Task Guest_delete_all_incomplete_keeps_guest_document() => new Contract(_fixture.Container!).DeleteAll_with_an_exhausted_budget_keeps_the_guest_document();
+
+    [EmulatorFact]
+    public Task Counters_are_atomic() => new Contract(_fixture.Container!).Counters_increment_atomically_per_window_and_start_at_one();
+
+    /// <summary>
+    /// ADR 0006 V3 (blocking): a transactional batch with PatchItem + FilterPredicate + Increment next to a create and a
+    /// replace. Failed predicate -> that operation 412, the others 424, nothing written; missing document -> 404 on the
+    /// patch operation; property-to-property predicate; success writes everything and refreshes ttl.
+    /// </summary>
+    [EmulatorFact]
+    public async Task V3_batch_patch_with_filter_predicate_reports_per_operation_results_and_writes_nothing_on_failure()
+    {
+        var container = _fixture.Container!;
+        var guest = "guest-" + Guid.NewGuid();
+        var pk = new PartitionKey(guest);
+        var retention = new RetentionPolicy(null, TimeSpan.FromMinutes(255));
+        await new CosmosGuestStore(new CosmosChatContainer(container), retention)
+            .CreateAsync(new GuestRecord(guest, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddHours(4), 0, 1, 0, 1), default);
+
+        SessionDoc NewSession() => new() { Id = Guid.NewGuid().ToString(), UserId = guest, SessionId = Guid.NewGuid().ToString(), WorkflowId = "wf" };
+
+        async Task<TransactionalBatchResponse> RunAsync(SessionDoc session, string patchId = GuestDoc.DocumentId) =>
+            await container.CreateTransactionalBatch(pk)
+                .CreateItem(session)
+                .PatchItem(patchId, GuestQuota.PatchOperations("/turnCount", 600), GuestQuota.Predicate("turnCount", "maxTurns"))
+                .ExecuteAsync();
+
+        async Task<bool> ExistsAsync(string id)
+        {
+            using var response = await container.ReadItemStreamAsync(id, pk);
+            return response.StatusCode == HttpStatusCode.OK;
+        }
+
+        // 1. Predicate true (0 < 1): both applied; counter incremented, ttl refreshed.
+        var first = NewSession();
+        using (var ok = await RunAsync(first))
+        {
+            Assert.True(ok.IsSuccessStatusCode);
+            Assert.All(Enumerable.Range(0, ok.Count), i => Assert.Equal(HttpStatusCode.OK, ok[i].StatusCode is HttpStatusCode.Created ? HttpStatusCode.OK : ok[i].StatusCode));
+        }
+
+        Assert.True(await ExistsAsync(first.Id));
+        var afterFirst = (await container.ReadItemAsync<GuestDoc>(GuestDoc.DocumentId, pk)).Resource;
+        Assert.Equal(1, afterFirst.TurnCount);
+        Assert.Equal(600, afterFirst.Ttl);
+
+        // 2. Predicate false (1 < 1): patch 412, create 424, nothing written, counter unchanged.
+        var second = NewSession();
+        using (var failed = await RunAsync(second))
+        {
+            Assert.False(failed.IsSuccessStatusCode);
+            Assert.Equal(2, failed.Count);
+            Assert.Equal(HttpStatusCode.FailedDependency, failed[0].StatusCode);
+            Assert.Equal(HttpStatusCode.PreconditionFailed, failed[1].StatusCode);
+            Assert.Equal(HttpStatusCode.PreconditionFailed, failed.StatusCode);
+        }
+
+        Assert.False(await ExistsAsync(second.Id));
+        Assert.Equal(1, (await container.ReadItemAsync<GuestDoc>(GuestDoc.DocumentId, pk)).Resource.TurnCount);
+
+        // 3. Missing guest document: patch 404, create 424, nothing written.
+        var otherGuest = new PartitionKey("guest-" + Guid.NewGuid());
+        var third = new SessionDoc { Id = Guid.NewGuid().ToString(), UserId = otherGuest.ToString().Trim('[', ']', '"'), SessionId = "x", WorkflowId = "wf" };
+        using (var missing = await container.CreateTransactionalBatch(new PartitionKey(third.UserId))
+                   .CreateItem(third)
+                   .PatchItem(GuestDoc.DocumentId, GuestQuota.PatchOperations("/turnCount", 600), GuestQuota.Predicate("turnCount", "maxTurns"))
+                   .ExecuteAsync())
+        {
+            Assert.False(missing.IsSuccessStatusCode);
+            Assert.Equal(HttpStatusCode.FailedDependency, missing[0].StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, missing[1].StatusCode);
+        }
+
+        using (var response = await container.ReadItemStreamAsync(third.Id, new PartitionKey(third.UserId)))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+    }
+
+    [EmulatorFact]
     public Task Messages_of_foreign_session_are_empty() => new Contract(_fixture.Container!).ForeignMessagesAsync();
+
+    [EmulatorFact]
+    public Task Concurrent_guest_turn_starts_respect_the_quota() =>
+        new Contract(_fixture.Container!).Run(c => c.Concurrent_guest_turn_starts_on_separate_sessions_never_exceed_max_turns());
+
+    [EmulatorFact]
+    public Task Concurrent_guest_session_creation_respects_the_quota() =>
+        new Contract(_fixture.Container!).Run(c => c.Concurrent_guest_session_creation_never_exceeds_max_sessions());
+
+    [EmulatorFact]
+    public Task Concurrent_turn_starts_on_one_session_respect_the_quota() =>
+        new Contract(_fixture.Container!).Run(c => c.Concurrent_turn_starts_on_one_session_are_Busy_or_quota_and_never_exceed_max_turns());
 }

@@ -15,13 +15,15 @@ public sealed class CosmosSessionStore(
     CosmosChatContainer chat,
     IOptions<ChatLimitsOptions> options,
     TimeProvider timeProvider,
+    RetentionPolicy retention,
     ILogger<CosmosSessionStore>? logger = null) : ISessionStore
 {
     private const int DeleteBatchSize = 100;
     private Container Container => chat.Container;
     private ChatLimitsOptions Options => options.Value;
 
-    public async Task<SessionRecord> CreateAsync(string userId, string workflowId, string? title, CancellationToken ct)
+    public async Task<CreateSessionResult> CreateAsync(
+        string userId, string workflowId, string? title, bool enforceGuestQuota, CancellationToken ct)
     {
         var now = timeProvider.GetUtcNow();
         var id = TurnRules.NewId();
@@ -34,10 +36,30 @@ public sealed class CosmosSessionStore(
             Title = title,
             CreatedAt = now,
             UpdatedAt = now,
-            Ttl = TurnRules.TtlSeconds(Options.RetentionDays),
+            Ttl = retention.TtlSeconds(userId),
         };
-        await Container.CreateItemAsync(doc, new PartitionKey(userId), cancellationToken: ct);
-        return doc.ToRecord();
+        if (!enforceGuestQuota)
+        {
+            await Container.CreateItemAsync(doc, new PartitionKey(userId), cancellationToken: ct);
+            return new CreateSessionResult.Created(doc.ToRecord());
+        }
+
+        // Guest: session create + conditional patch of the guest document in ONE transaction (ADR 0006 section 6.2).
+        using var response = await Container.CreateTransactionalBatch(new PartitionKey(userId))
+            .CreateItem(doc)
+            .PatchItem(GuestDoc.DocumentId, GuestQuota.PatchOperations("/sessionCount", retention.GuestTtlSeconds), GuestQuota.Predicate("sessionCount", "maxSessions"))
+            .ExecuteAsync(ct);
+        if (response.IsSuccessStatusCode)
+        {
+            return new CreateSessionResult.Created(doc.ToRecord());
+        }
+
+        return GuestQuota.PatchStatus(response, patchIndex: 1) switch
+        {
+            HttpStatusCode.NotFound => new CreateSessionResult.GuestExpired(),
+            HttpStatusCode.PreconditionFailed => new CreateSessionResult.GuestQuotaExceeded(),
+            _ => throw new InvalidOperationException($"Creating the guest session failed with Cosmos status {(int)response.StatusCode}."),
+        };
     }
 
     public async Task<SessionRecord?> GetAsync(string userId, string sessionId, CancellationToken ct)
@@ -95,7 +117,7 @@ public sealed class CosmosSessionStore(
 
             doc.State = DocumentTypes.Deleting;
             doc.ActiveTurn = new ActiveTurnDoc { TurnId = TurnRules.NewId(), StartedAt = now };
-            doc.Ttl = TurnRules.TtlSeconds(Options.RetentionDays);
+            doc.Ttl = retention.TtlSeconds(userId);
             try
             {
                 await Container.ReplaceItemAsync(doc, doc.Id, pk, new ItemRequestOptions { IfMatchEtag = etag }, ct);
@@ -193,7 +215,7 @@ public sealed class CosmosSessionStore(
                 var now = timeProvider.GetUtcNow();
                 doc.State = DocumentTypes.Deleting;
                 doc.ActiveTurn = new ActiveTurnDoc { TurnId = TurnRules.NewId(), StartedAt = now };
-                doc.Ttl = TurnRules.TtlSeconds(Options.RetentionDays);
+                doc.Ttl = retention.TtlSeconds(userId);
                 try
                 {
                     await Container.ReplaceItemAsync(doc, doc.Id, pk, new ItemRequestOptions { IfMatchEtag = etag }, ct);
@@ -251,10 +273,23 @@ public sealed class CosmosSessionStore(
             }
         }
 
+        // 3a. A guest's identity ends with its data: the guest document goes LAST (data-model 1.7).
+        if (GuestOptions.IsGuestId(userId))
+        {
+            try
+            {
+                await Container.DeleteItemAsync<GuestDoc>(GuestDoc.DocumentId, pk, cancellationToken: ct);
+            }
+            catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+            {
+            }
+        }
+
         return Finish(DeleteUserDataResult.Completed);
     }
 
-    public async Task<StartTurnResult> TryStartTurnAsync(string userId, string sessionId, MessageRecord userMessage, CancellationToken ct)
+    public async Task<StartTurnResult> TryStartTurnAsync(
+        string userId, string sessionId, MessageRecord userMessage, bool enforceGuestQuota, CancellationToken ct)
     {
         TurnRules.EnsureUserMessage(sessionId, userMessage);
         var pk = new PartitionKey(userId);
@@ -276,16 +311,33 @@ public sealed class CosmosSessionStore(
         doc.UpdatedAt = now;
         doc.MessageCount++;
         doc.Title ??= TurnRules.AutoTitle(userMessage.Content);
-        doc.Ttl = TurnRules.TtlSeconds(Options.RetentionDays);
+        doc.Ttl = retention.TtlSeconds(userId);
 
-        using var response = await Container.CreateTransactionalBatch(pk)
-            .CreateItem(MessageDoc.From(userId, userMessage, TurnRules.TtlSeconds(Options.RetentionDays)))
-            .ReplaceItem(doc.Id, doc, new TransactionalBatchItemRequestOptions { IfMatchEtag = etag })
-            .ExecuteAsync(ct);
+        var batch = Container.CreateTransactionalBatch(pk)
+            .CreateItem(MessageDoc.From(userId, userMessage, retention.TtlSeconds(userId)))
+            .ReplaceItem(doc.Id, doc, new TransactionalBatchItemRequestOptions { IfMatchEtag = etag });
+        if (enforceGuestQuota)
+        {
+            // Last on purpose: a session conflict (ETag) reports on the replace and stays "Busy"; the patch then reports 424.
+            batch.PatchItem(GuestDoc.DocumentId, GuestQuota.PatchOperations("/turnCount", retention.GuestTtlSeconds), GuestQuota.Predicate("turnCount", "maxTurns"));
+        }
+
+        using var response = await batch.ExecuteAsync(ct);
 
         if (response.IsSuccessStatusCode)
         {
             return new StartTurnResult.Started(lease);
+        }
+
+        if (enforceGuestQuota)
+        {
+            switch (GuestQuota.PatchStatus(response, patchIndex: 2))
+            {
+                case HttpStatusCode.NotFound:
+                    return new StartTurnResult.GuestExpired();
+                case HttpStatusCode.PreconditionFailed:
+                    return new StartTurnResult.GuestQuotaExceeded();
+            }
         }
 
         return response.StatusCode switch
@@ -320,13 +372,13 @@ public sealed class CosmosSessionStore(
 
             doc.ActiveTurn = null;
             doc.UpdatedAt = timeProvider.GetUtcNow();
-            doc.Ttl = TurnRules.TtlSeconds(Options.RetentionDays);
+            doc.Ttl = retention.TtlSeconds(userId);
 
             var batch = Container.CreateTransactionalBatch(pk);
             if (assistantMessage is not null)
             {
                 doc.MessageCount++;
-                batch.CreateItem(MessageDoc.From(userId, assistantMessage, TurnRules.TtlSeconds(Options.RetentionDays)));
+                batch.CreateItem(MessageDoc.From(userId, assistantMessage, retention.TtlSeconds(userId)));
             }
 
             batch.ReplaceItem(doc.Id, doc, new TransactionalBatchItemRequestOptions { IfMatchEtag = etag });

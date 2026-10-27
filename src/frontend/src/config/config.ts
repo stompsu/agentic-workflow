@@ -12,7 +12,19 @@ export interface AuthConfig {
   redirectUri: string;
   apiScopes: string[];
   providers: ProviderConfig[];
+  /** Guest access ("Continue as guest", ADR 0006). The button is rendered only when enabled. */
+  guest: GuestConfig;
 }
+
+export interface GuestConfig {
+  enabled: boolean;
+  /** Button label (plain text). */
+  label: string;
+}
+
+export const DEFAULT_GUEST_LABEL = 'Continue as guest';
+export const DEFAULT_GUEST_SESSION_HOURS = 4;
+export const DEFAULT_GUEST_RETENTION_HOURS = 5;
 
 export interface BrandingConfig {
   /** Application name shown on the login page, the top bar and the document title. */
@@ -28,6 +40,10 @@ export interface AppInfoConfig {
   retentionDays?: number;
   /** Plain-text contact (e.g. an email address) for sign-in account deletion. Rendered as text, never as HTML. */
   supportContact?: string;
+  /** Guest session length in hours (= backend Guest:MaxLifetime; 1..12). Used in the login caption. */
+  guestSessionHours?: number;
+  /** Hours until guest chats are deleted after the last message (= Guest:DataTtl rounded up; 1..168). */
+  guestRetentionHours?: number;
 }
 
 export interface AppConfig {
@@ -92,12 +108,34 @@ export function parseConfig(raw: unknown): AppConfig {
     }
   }
 
+  const guestRaw = auth.guest;
+  if (guestRaw !== undefined && guestRaw !== null && !isRecord(guestRaw)) throw new ConfigError('config.json: "auth.guest" must be an object');
+  const guestObj = isRecord(guestRaw) ? guestRaw : {};
+  if (guestObj.enabled !== undefined && typeof guestObj.enabled !== 'boolean') {
+    throw new ConfigError('config.json: "auth.guest.enabled" must be a boolean');
+  }
+  const guest: GuestConfig = {
+    enabled: guestObj.enabled === true,
+    label: typeof guestObj.label === 'string' && guestObj.label.trim() !== '' ? guestObj.label.trim() : DEFAULT_GUEST_LABEL,
+  };
+
   const apiBaseUrl = typeof raw.apiBaseUrl === 'string' && raw.apiBaseUrl !== '' ? raw.apiBaseUrl.replace(/\/+$/, '') : '/api';
 
   const app = isRecord(raw.app) ? raw.app : {};
   const nonEmpty = (v: unknown, fallback: string) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : fallback);
 
   const info: AppInfoConfig = {};
+  const hours = (v: unknown, name: string, max: number): number | undefined => {
+    if (v === undefined || v === null) return undefined;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > max) {
+      throw new ConfigError(`config.json: "${name}" must be an integer from 1 to ${max}`);
+    }
+    return v;
+  };
+  const sessionHours = hours(app.guestSessionHours, 'app.guestSessionHours', 12);
+  if (sessionHours !== undefined) info.guestSessionHours = sessionHours;
+  const retentionHours = hours(app.guestRetentionHours, 'app.guestRetentionHours', 168);
+  if (retentionHours !== undefined) info.guestRetentionHours = retentionHours;
   if (app.retentionDays !== undefined && app.retentionDays !== null) {
     const n = app.retentionDays;
     if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 3650) {
@@ -121,6 +159,7 @@ export function parseConfig(raw: unknown): AppConfig {
       redirectUri: typeof auth.redirectUri === 'string' && auth.redirectUri !== '' ? auth.redirectUri : '/redirect.html',
       apiScopes,
       providers,
+      guest,
     },
     apiBaseUrl,
   };

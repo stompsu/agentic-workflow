@@ -8,7 +8,7 @@ using SupportChat.Core.Options;
 
 namespace SupportChat.Api.Chat;
 
-/// <summary>Per-user (oid) limiter on POST messages, per replica (api-contract 5, 6; plan.md section 5).</summary>
+/// <summary>Per-user (oid) limiter on POST messages, per replica (api-contract 5, 6; plan.md section 5); guests use Guest:TurnsPerMinute.</summary>
 public static class ChatRateLimiting
 {
     public const string PolicyName = "chat-messages";
@@ -21,10 +21,14 @@ public static class ChatRateLimiting
             options.AddPolicy(PolicyName, context =>
             {
                 var limits = context.RequestServices.GetRequiredService<IOptions<ChatLimitsOptions>>().Value;
-                var key = CurrentUser.TryGetUserId(context.User, out var userId) ? userId : "unauthenticated";
+                var guest = context.RequestServices.GetRequiredService<IOptions<GuestOptions>>().Value;
+                var known = CurrentUser.TryGetUser(context.User, out var userId, out var kind);
+                var key = known ? userId : "unauthenticated";
+                // Guests get their own (stricter) limit; the partition keys stay disjoint because the id formats are disjoint.
+                var permits = known && kind == UserKind.Guest ? guest.TurnsPerMinute : limits.TurnsPerMinute;
                 return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = Math.Max(1, limits.TurnsPerMinute),
+                    PermitLimit = Math.Max(1, permits),
                     Window = TimeSpan.FromMinutes(1),
                     QueueLimit = 0,
                     AutoReplenishment = true,

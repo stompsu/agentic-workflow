@@ -94,6 +94,12 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             new SupportChat.Core.Options.ChatLimitsOptions
             {
                 RetentionDays = int.TryParse(Config.GetValueOrDefault("Chat:RetentionDays"), out var days) ? days : null,
+            },
+            new SupportChat.Core.Options.GuestOptions
+            {
+                DataTtl = TimeSpan.TryParse(Config.GetValueOrDefault("Guest:DataTtl"), System.Globalization.CultureInfo.InvariantCulture, out var ttl)
+                    ? ttl
+                    : new SupportChat.Core.Options.GuestOptions().DataTtl,
             });
     }
 
@@ -150,6 +156,8 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IMessageStore>();
             services.AddSingleton<ISessionStore>(Store);
             services.AddSingleton<IMessageStore>(Store);
+            services.RemoveAll<IGuestStore>();
+            services.AddSingleton<IGuestStore>(Store);
             services.RemoveAll<IReadinessCheck>();
             services.AddSingleton<IReadinessCheck>(Readiness);
             services.RemoveAll<IChatClientFactory>();

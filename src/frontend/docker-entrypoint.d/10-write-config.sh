@@ -20,6 +20,11 @@
 #                                     and /data-deletion.html. Invalid value = startup failure.
 #   APP_SUPPORT_CONTACT     optional  plain text, max 200 chars, no control characters (e.g. an email address);
 #                                     config.json app.supportContact and /data-deletion.html. Always rendered as text.
+#   AUTH_GUEST_ENABLED      optional  true | false (default false): shows "Continue as guest" (config.json auth.guest.enabled).
+#                                     Must match the backend Guest__Enabled. Anything else = startup failure.
+#   AUTH_GUEST_LABEL        optional  button label, plain text, max 60 chars, no control characters; default "Continue as guest"
+#   APP_GUEST_SESSION_HOURS optional  integer 1..12 (= backend Guest:MaxLifetime in hours); config.json app.guestSessionHours
+#   APP_GUEST_RETENTION_HOURS optional integer 1..168 (= Guest:DataTtl rounded up to hours); config.json app.guestRetentionHours
 #   API_BASE_URL            optional  default /api
 set -eu
 
@@ -47,6 +52,26 @@ APP_TAGLINE="${APP_TAGLINE:-Sign in to continue.}"
 
 APP_RETENTION_DAYS="${APP_RETENTION_DAYS:-}"
 APP_SUPPORT_CONTACT="${APP_SUPPORT_CONTACT:-}"
+
+AUTH_GUEST_ENABLED="${AUTH_GUEST_ENABLED:-false}"
+AUTH_GUEST_LABEL="${AUTH_GUEST_LABEL:-Continue as guest}"
+APP_GUEST_SESSION_HOURS="${APP_GUEST_SESSION_HOURS:-}"
+APP_GUEST_RETENTION_HOURS="${APP_GUEST_RETENTION_HOURS:-}"
+
+case "$AUTH_GUEST_ENABLED" in
+  true|false) ;;
+  *) fail "AUTH_GUEST_ENABLED must be true or false" ;;
+esac
+jq -n -e --arg v "$AUTH_GUEST_LABEL" '($v | length) >= 1 and ($v | length) <= 60 and ($v | explode | any(. < 32 or . == 127) | not)' >/dev/null \
+  || fail "AUTH_GUEST_LABEL must be 1 to 60 characters of plain text without control characters"
+if [ -n "$APP_GUEST_SESSION_HOURS" ]; then
+  printf '%s' "$APP_GUEST_SESSION_HOURS" | grep -Eq '^[1-9][0-9]?$' && [ "$APP_GUEST_SESSION_HOURS" -le 12 ] \
+    || fail "APP_GUEST_SESSION_HOURS must be an integer from 1 to 12"
+fi
+if [ -n "$APP_GUEST_RETENTION_HOURS" ]; then
+  printf '%s' "$APP_GUEST_RETENTION_HOURS" | grep -Eq '^[1-9][0-9]{0,2}$' && [ "$APP_GUEST_RETENTION_HOURS" -le 168 ] \
+    || fail "APP_GUEST_RETENTION_HOURS must be an integer from 1 to 168"
+fi
 
 if [ -n "$APP_RETENTION_DAYS" ]; then
   printf '%s' "$APP_RETENTION_DAYS" | grep -Eq '^[1-9][0-9]{0,3}$' && [ "$APP_RETENTION_DAYS" -le 3650 ] \
@@ -81,6 +106,10 @@ jq -n \
   --arg appTagline "$APP_TAGLINE" \
   --arg retentionDays "$APP_RETENTION_DAYS" \
   --arg supportContact "$APP_SUPPORT_CONTACT" \
+  --argjson guestEnabled "$AUTH_GUEST_ENABLED" \
+  --arg guestLabel "$AUTH_GUEST_LABEL" \
+  --arg guestSessionHours "$APP_GUEST_SESSION_HOURS" \
+  --arg guestRetentionHours "$APP_GUEST_RETENTION_HOURS" \
   --argjson providers "$AUTH_PROVIDERS" \
   '{
      auth: {
@@ -89,12 +118,15 @@ jq -n \
        knownAuthorities: ($known | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))),
        redirectUri: $redirectUri,
        apiScopes: ($scopes | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))),
-       providers: $providers
+       providers: $providers,
+       guest: { enabled: $guestEnabled, label: $guestLabel }
      },
      app: (
        { title: $appTitle, tagline: $appTagline }
        + (if $retentionDays != "" then { retentionDays: ($retentionDays | tonumber) } else {} end)
        + (if $supportContact != "" then { supportContact: $supportContact } else {} end)
+       + (if $guestSessionHours != "" then { guestSessionHours: ($guestSessionHours | tonumber) } else {} end)
+       + (if $guestRetentionHours != "" then { guestRetentionHours: ($guestRetentionHours | tonumber) } else {} end)
      ),
      apiBaseUrl: $apiBaseUrl
    }' > "$TMP"

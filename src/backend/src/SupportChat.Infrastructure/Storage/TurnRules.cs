@@ -21,8 +21,6 @@ internal static partial class TurnRules
         return trimmed.Length <= AutoTitleLength ? trimmed : trimmed[..AutoTitleLength].TrimEnd();
     }
 
-    public static int? TtlSeconds(int? retentionDays) => retentionDays is > 0 ? retentionDays.Value * 86400 : null;
-
     public static string NewId() => Guid.CreateVersion7().ToString();
 
     public static string RoleName(ChatRole role) => role.Value;

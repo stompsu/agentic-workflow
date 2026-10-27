@@ -15,6 +15,7 @@ using SupportChat.Infrastructure.Health;
 using SupportChat.Infrastructure.Models;
 using SupportChat.Infrastructure.Search;
 using SupportChat.Infrastructure.Smoke;
+using SupportChat.Infrastructure.Storage;
 using SupportChat.Infrastructure.Storage.Cosmos;
 
 namespace SupportChat.Infrastructure;
@@ -31,6 +32,8 @@ public static class ServiceCollectionExtensions
 
         services.AddOptions<AzureOptions>().Bind(configuration.GetSection(AzureOptions.SectionName)).ValidateOnStart();
         services.AddSingleton<IValidateOptions<AzureOptions>, AzureStartupOptionsValidator>();
+        services.AddSingleton<IValidateOptions<AzureOptions>, GuestStartupOptionsValidator>(); // ADR 0003 rules 12-17
+        services.AddOptions<GuestOptions>().Bind(configuration.GetSection(GuestOptions.SectionName));
         services.AddOptions<CosmosOptions>().Bind(configuration.GetSection(CosmosOptions.SectionName));
         services.AddOptions<SearchServiceOptions>().Bind(configuration.GetSection(SearchServiceOptions.SectionName));
         services.AddOptions<FoundryOptions>().Bind(configuration.GetSection(FoundryOptions.SectionName));
@@ -44,6 +47,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IAzureClientFactory>().CreateSearchClient(sp.GetRequiredService<IOptions<SearchServiceOptions>>().Value.IndexName));
 
         services.AddSingleton<CosmosChatContainer>();
+        services.AddSingleton(sp => new RetentionPolicy(sp.GetRequiredService<IOptions<ChatLimitsOptions>>(), sp.GetRequiredService<IOptions<GuestOptions>>())); // ttl by user (data-model 1.3)
+        services.AddSingleton<IGuestStore, CosmosGuestStore>();
         services.AddSingleton<ISessionStore, CosmosSessionStore>();
         services.AddSingleton<IMessageStore, CosmosMessageStore>();
         services.AddSingleton<IReadinessCheck, CosmosReadinessCheck>();

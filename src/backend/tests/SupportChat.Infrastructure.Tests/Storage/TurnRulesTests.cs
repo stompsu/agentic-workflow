@@ -13,13 +13,6 @@ public class TurnRulesTests
     }
 
     [Fact]
-    public void Retention_days_map_to_ttl_seconds_and_unset_means_no_ttl()
-    {
-        Assert.Null(TurnRules.TtlSeconds(null));
-        Assert.Equal(90 * 86400, TurnRules.TtlSeconds(90));
-    }
-
-    [Fact]
     public void Continuation_tokens_roundtrip_and_reject_garbage()
     {
         var token = ContinuationTokens.Encode("{\"token\":\"abc\"}");

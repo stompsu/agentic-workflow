@@ -35,3 +35,20 @@ param supportContact = 'REPLACE_ME'
 // cheaper model than the specialists.
 param orchestratorDeployment = 'REPLACE_ME'
 param specialistDeployment = 'REPLACE_ME'
+
+// Guest access (ADR 0006): OFF in prod. Enabling needs the ADR 0006 prod preconditions (CAPTCHA, G7) and a set alertEmail
+// (check-params.sh fails if guestAccessEnabled = true and alertEmail is empty). It also adds Key Vault Crypto User for the
+// app identity (prod has no Key Vault role today) and creates the guest-token-signing key.
+param guestAccessEnabled = false
+// Required together with guestAccessEnabled = true in prod (G7 CAPTCHA + prod Crypto User role in place); main.bicep fails and check-params.sh rejects otherwise.
+// param guestProdPreconditionsAck = true
+param guestMaxLifetimeHours = 4
+param guestDataTtlMinutes = 255 // 4 h 15 min; >= lifetime + 5 min
+// Optional caps (omit = backend defaults 200 / 30 / 5 / 300 / 2000):
+// param guestMaxCreationsPerHour = 200
+// param guestMaxTurns = 30
+// param guestMaxSessions = 5
+// param guestMaxTurnsPerHour = 300
+// param guestMaxTurnsPerDay = 2000
+// Operator email for the guest signing key alert; only needed when guestAccessEnabled = true.
+param alertEmail = ''

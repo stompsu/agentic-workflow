@@ -7,7 +7,7 @@ import {
 } from '@azure/msal-browser';
 import { MsalProvider, useMsal } from '@azure/msal-react';
 import type { AuthConfig } from '../config/config';
-import { AuthContext, type AuthContextValue } from './AuthContext';
+import { SocialAuthContext, type SocialAuthValue } from './AuthContext';
 import { buildLoginRequest, buildMsalConfiguration } from './msalConfig';
 
 function MsalBridge({ auth, children }: { auth: AuthConfig; children: ReactNode }) {
@@ -35,7 +35,7 @@ function MsalBridge({ auth, children }: { auth: AuthConfig; children: ReactNode 
 
   const handleAuthFailure = useCallback(() => setExpired(true), []);
 
-  const value = useMemo<AuthContextValue>(() => {
+  const value = useMemo<SocialAuthValue>(() => {
     const loading = inProgress === InteractionStatus.Startup || inProgress === InteractionStatus.HandleRedirect;
     const authenticated = account !== undefined && !expired;
     return {
@@ -54,7 +54,7 @@ function MsalBridge({ auth, children }: { auth: AuthConfig; children: ReactNode 
     };
   }, [account, auth.apiScopes, expired, getToken, handleAuthFailure, inProgress, instance]);
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <SocialAuthContext.Provider value={value}>{children}</SocialAuthContext.Provider>;
 }
 
 /** Real auth: MSAL (authorization code + PKCE) against Entra External ID, configured from runtime config. */

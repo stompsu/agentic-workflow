@@ -26,6 +26,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 }
 
 output workspaceName string = workspace.name
+output appInsightsId string = appInsights.id
 // Marked secure so it is not recorded in deployment history; main.bicep passes it module-to-module only (never a main output).
 @secure()
 output appInsightsConnectionString string = appInsights.properties.ConnectionString

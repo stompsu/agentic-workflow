@@ -178,7 +178,8 @@ public class ChatEndpointTests : IDisposable
     [Fact]
     public async Task Session_whose_workflow_is_no_longer_registered_is_409_workflow_unavailable()
     {
-        var session = await _host.Factory.Store.CreateAsync(_host.User, "retired-workflow", null, CancellationToken.None);
+        var session = ((SupportChat.Core.Storage.CreateSessionResult.Created)await _host.Factory.Store.CreateAsync(
+            _host.User, "retired-workflow", null, false, CancellationToken.None)).Session;
 
         var response = await _host.Client.PostAsync($"/api/sessions/{session.Id}/messages", Helpers.Json("""{"content":"x"}"""));
 

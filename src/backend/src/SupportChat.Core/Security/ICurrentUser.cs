@@ -5,4 +5,7 @@ public interface ICurrentUser
 {
     /// <summary>Lowercase GUID string. Throws <see cref="InvalidOperationException"/> if the token has no valid oid.</summary>
     string UserId { get; }
+
+    /// <summary>True when the validated token is a guest token (decided by the validating scheme, never by the id prefix).</summary>
+    bool IsGuest { get; }
 }

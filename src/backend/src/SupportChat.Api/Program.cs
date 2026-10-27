@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using SupportChat.Api.Auth;
 using SupportChat.Api.Chat;
 using SupportChat.Api.Endpoints;
+using SupportChat.Api.Guests;
 using SupportChat.Api.Http;
 using SupportChat.Core.Options;
 using SupportChat.Infrastructure;
@@ -35,6 +36,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddAgentWorkflows(builder.Configuration);
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddChatAuth(builder.Configuration);
+builder.Services.AddGuestAccess();
 builder.Services.AddChatRateLimiting();
 builder.Services.AddSingleton<IValidateOptions<ChatLimitsOptions>, ChatOptionsValidator>();
 builder.Services.AddOptions<ChatLimitsOptions>().ValidateOnStart();
@@ -66,8 +68,10 @@ app.UseAuthorization();
 app.UseRateLimiter();
 
 app.MapHealthEndpoints();
+app.MapGuestEndpoints(); // POST /api/guest/token: anonymous, 404 guest_access_disabled when guests are off
 
 var api = app.MapGroup("/api").RequireAuthorization(AuthExtensions.ChatUserPolicy);
+api.AddEndpointFilter<GuestActivityFilter>(); // ended guest -> 401 guest_expired (skipped for DELETE /api/me/data)
 api.MapWorkflowEndpoints();
 api.MapSessionEndpoints();
 api.MapMeEndpoints();

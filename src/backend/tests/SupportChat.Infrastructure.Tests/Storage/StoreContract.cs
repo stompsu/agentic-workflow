@@ -33,6 +33,11 @@ public abstract class StoreContract
 
     protected abstract IMessageStore Messages { get; }
 
+    protected abstract IGuestStore Guests { get; }
+
+    /// <summary>Deletes only the guest document (simulates ttl expiry of the guest document).</summary>
+    protected abstract Task RemoveGuestDocumentAsync(string guestUserId);
+
     protected abstract DateTimeOffset Now { get; }
 
     protected abstract void Advance(TimeSpan by);
@@ -437,5 +442,237 @@ public abstract class StoreContract
         await Sessions.CreateAsync(UserA, "wf", "t", default);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => Sessions.DeleteAllUserDataAsync(UserA, TimeSpan.FromMinutes(1), cts.Token));
+    }
+
+    // ---- guest documents, quotas and counters (ADR 0006 sections 6.2, 6.4; data-model 1.8) ----
+
+    private static string NewGuestId() => "guest-" + Guid.NewGuid();
+
+    private async Task<string> NewGuestAsync(int maxTurns = 30, int maxSessions = 5)
+    {
+        var id = NewGuestId();
+        await Guests.CreateAsync(new GuestRecord(id, Now, Now.AddHours(4), 0, maxTurns, 0, maxSessions), default);
+        return id;
+    }
+
+    private async Task<SessionRecord> GuestSessionAsync(string guest) =>
+        Assert.IsType<CreateSessionResult.Created>(await Sessions.CreateAsync(guest, "wf", "t", true, default)).Session;
+
+    [Fact]
+    public async Task Guest_document_roundtrips_and_an_unknown_guest_is_null()
+    {
+        var id = await NewGuestAsync(7, 3);
+        var read = await Guests.GetAsync(id, default);
+        Assert.NotNull(read);
+        Assert.Equal((id, 0, 7, 0, 3), (read.UserId, read.TurnCount, read.MaxTurns, read.SessionCount, read.MaxSessions));
+        Assert.Null(await Guests.GetAsync(NewGuestId(), default));
+        Assert.Null(await Guests.GetAsync(UserA, default)); // a social user's partition has no guest document
+    }
+
+    [Fact]
+    public async Task Guest_session_quota_stops_at_max_sessions_and_persists_nothing_beyond_it()
+    {
+        var guest = await NewGuestAsync(maxSessions: 2);
+        await GuestSessionAsync(guest);
+        var second = await GuestSessionAsync(guest);
+        Assert.IsType<CreateSessionResult.GuestQuotaExceeded>(await Sessions.CreateAsync(guest, "wf", "t", true, default));
+
+        Assert.Equal(2, (await Sessions.ListAsync(guest, 50, null, default)).Items.Count);
+        Assert.Equal(2, (await Guests.GetAsync(guest, default))!.SessionCount);
+
+        // Deleting a session does not give the quota back.
+        Assert.Equal(DeleteSessionResult.Deleted, await Sessions.DeleteAsync(guest, second.Id, default));
+        Assert.IsType<CreateSessionResult.GuestQuotaExceeded>(await Sessions.CreateAsync(guest, "wf", "t", true, default));
+    }
+
+    [Fact]
+    public async Task Guest_turn_quota_stops_at_max_turns_and_persists_nothing_beyond_it()
+    {
+        var guest = await NewGuestAsync(maxTurns: 2);
+        var s = await GuestSessionAsync(guest);
+        for (var i = 0; i < 2; i++)
+        {
+            var started = await Sessions.TryStartTurnAsync(guest, s.Id, Msg.User(s.Id, $"q{i}", Now), true, default);
+            var lease = Assert.IsType<StartTurnResult.Started>(started).Lease;
+            await Sessions.CompleteTurnAsync(guest, lease, Msg.Assistant(s.Id, $"a{i}", Now), default);
+        }
+
+        var documentsBefore = await CountDocumentsAsync(guest);
+        Assert.IsType<StartTurnResult.GuestQuotaExceeded>(
+            await Sessions.TryStartTurnAsync(guest, s.Id, Msg.User(s.Id, "q3", Now), true, default));
+
+        Assert.Equal(documentsBefore, await CountDocumentsAsync(guest));
+        Assert.Equal(2, (await Guests.GetAsync(guest, default))!.TurnCount);
+        // The lock was not taken either: a (non-quota) start still succeeds.
+        Assert.IsType<StartTurnResult.Started>(await Sessions.TryStartTurnAsync(guest, s.Id, Msg.User(s.Id, "x", Now), false, default));
+    }
+
+    [Fact]
+    public async Task Guest_without_a_document_is_GuestExpired_and_nothing_is_written()
+    {
+        var guest = await NewGuestAsync();
+        var s = await GuestSessionAsync(guest);
+        await RemoveGuestDocumentAsync(guest);
+        var documentsBefore = await CountDocumentsAsync(guest);
+
+        Assert.IsType<CreateSessionResult.GuestExpired>(await Sessions.CreateAsync(guest, "wf", "t", true, default));
+        Assert.IsType<StartTurnResult.GuestExpired>(await Sessions.TryStartTurnAsync(guest, s.Id, Msg.User(s.Id, "q", Now), true, default));
+
+        Assert.Equal(documentsBefore, await CountDocumentsAsync(guest));
+        // No lock was taken and no message written.
+        Assert.IsType<StartTurnResult.Started>(await Sessions.TryStartTurnAsync(guest, s.Id, Msg.User(s.Id, "q", Now), false, default));
+    }
+
+    [Fact]
+    public async Task Guest_turn_quota_is_not_consumed_by_Busy_or_NotFound()
+    {
+        var guest = await NewGuestAsync(maxTurns: 5);
+        var s = await GuestSessionAsync(guest);
+        await StartAsync(guest, s.Id); // non-quota start only to hold the lock
+
+        Assert.IsType<StartTurnResult.Busy>(await Sessions.TryStartTurnAsync(guest, s.Id, Msg.User(s.Id, "x", Now), true, default));
+        var unknown = Guid.NewGuid().ToString();
+        Assert.IsType<StartTurnResult.NotFound>(await Sessions.TryStartTurnAsync(guest, unknown, Msg.User(unknown, "x", Now), true, default));
+
+        Assert.Equal(0, (await Guests.GetAsync(guest, default))!.TurnCount);
+    }
+
+    [Fact]
+    public async Task A_social_user_is_never_subject_to_a_guest_quota_when_enforcement_is_off()
+    {
+        var s = await Sessions.CreateAsync(UserA, "wf", "t", default);
+        Assert.IsType<StartTurnResult.Started>(await Sessions.TryStartTurnAsync(UserA, s.Id, Msg.User(s.Id, "q", Now), false, default));
+        Assert.Null(await Guests.GetAsync(UserA, default));
+    }
+
+    [Fact]
+    public async Task Guest_A_guest_B_and_a_social_user_cannot_see_or_touch_each_other()
+    {
+        var a = await NewGuestAsync();
+        var b = await NewGuestAsync();
+        var sa = await GuestSessionAsync(a);
+        var lease = Assert.IsType<StartTurnResult.Started>(await Sessions.TryStartTurnAsync(a, sa.Id, Msg.User(sa.Id, "secret", Now), true, default)).Lease;
+        await Sessions.CompleteTurnAsync(a, lease, Msg.Assistant(sa.Id, "answer", Now), default);
+        var social = await Sessions.CreateAsync(UserA, "wf", "social", default);
+
+        foreach (var other in new[] { b, UserA })
+        {
+            Assert.Null(await Sessions.GetAsync(other, sa.Id, default));
+            Assert.Empty(await Messages.GetHistoryAsync(other, sa.Id, "none", 20, default));
+            Assert.Empty((await Messages.GetRecentAsync(other, sa.Id, 100, default)).Items);
+            Assert.Equal(DeleteSessionResult.NotFound, await Sessions.DeleteAsync(other, sa.Id, default));
+        }
+
+        foreach (var other in new[] { a, b })
+        {
+            Assert.Null(await Sessions.GetAsync(other, social.Id, default));
+        }
+
+        Assert.Null(await Sessions.GetAsync(a, social.Id, default));
+        Assert.IsType<StartTurnResult.NotFound>(await Sessions.TryStartTurnAsync(b, sa.Id, Msg.User(sa.Id, "intrude", Now), true, default));
+        Assert.Equal(0, (await Guests.GetAsync(b, default))!.TurnCount); // B's quota untouched by the attempt on A's session
+        Assert.Equal(1, (await Guests.GetAsync(a, default))!.TurnCount);
+
+        // Deleting B's data leaves A and the social user untouched.
+        Assert.Equal(DeleteUserDataResult.Completed, await Sessions.DeleteAllUserDataAsync(b, TimeSpan.FromMinutes(1), default));
+        Assert.Null(await Guests.GetAsync(b, default));
+        Assert.NotNull(await Guests.GetAsync(a, default));
+        Assert.NotNull(await Sessions.GetAsync(a, sa.Id, default));
+        Assert.NotNull(await Sessions.GetAsync(UserA, social.Id, default));
+    }
+
+    [Fact]
+    public async Task DeleteAll_for_a_guest_removes_the_guest_document_last_and_can_be_repeated()
+    {
+        var guest = await NewGuestAsync();
+        var s = await GuestSessionAsync(guest);
+        var lease = Assert.IsType<StartTurnResult.Started>(await Sessions.TryStartTurnAsync(guest, s.Id, Msg.User(s.Id, "q", Now), true, default)).Lease;
+        await Sessions.CompleteTurnAsync(guest, lease, Msg.Assistant(s.Id, "a", Now), default);
+
+        Assert.Equal(DeleteUserDataResult.Completed, await Sessions.DeleteAllUserDataAsync(guest, TimeSpan.FromMinutes(1), default));
+        Assert.Equal(0, await CountDocumentsAsync(guest));
+        Assert.Null(await Guests.GetAsync(guest, default));
+
+        // Ended guest: writes fail at once, the repeated delete still completes (idempotent).
+        Assert.IsType<CreateSessionResult.GuestExpired>(await Sessions.CreateAsync(guest, "wf", "t", true, default));
+        Assert.Equal(DeleteUserDataResult.Completed, await Sessions.DeleteAllUserDataAsync(guest, TimeSpan.FromMinutes(1), default));
+    }
+
+    [Fact]
+    public async Task DeleteAll_with_an_exhausted_budget_keeps_the_guest_document()
+    {
+        var guest = await NewGuestAsync();
+        await GuestSessionAsync(guest);
+        SetAutoAdvance(TimeSpan.FromMinutes(5));
+        Assert.Equal(DeleteUserDataResult.Incomplete, await Sessions.DeleteAllUserDataAsync(guest, TimeSpan.FromSeconds(1), default));
+        SetAutoAdvance(TimeSpan.Zero);
+        Assert.NotNull(await Guests.GetAsync(guest, default));
+    }
+
+    [Fact]
+    public async Task Concurrent_guest_turn_starts_on_separate_sessions_never_exceed_max_turns()
+    {
+        const int max = 5;
+        const int extra = 7;
+        var guest = await NewGuestAsync(maxTurns: max, maxSessions: max + extra);
+        var sessions = new List<SessionRecord>();
+        for (var i = 0; i < max + extra; i++)
+        {
+            sessions.Add(await GuestSessionAsync(guest));
+        }
+
+        var results = await Task.WhenAll(sessions.Select(s => Task.Run(
+            () => Sessions.TryStartTurnAsync(guest, s.Id, Msg.User(s.Id, "q", Now), true, default))));
+
+        // Each turn is on its own session, so Busy cannot happen here: exactly max start, the rest are over quota.
+        Assert.Equal(max, results.OfType<StartTurnResult.Started>().Count());
+        Assert.Equal(extra, results.OfType<StartTurnResult.GuestQuotaExceeded>().Count());
+        Assert.Equal(max, (await Guests.GetAsync(guest, default))!.TurnCount);
+    }
+
+    [Fact]
+    public async Task Concurrent_guest_session_creation_never_exceeds_max_sessions()
+    {
+        const int max = 3;
+        const int extra = 6;
+        var guest = await NewGuestAsync(maxSessions: max);
+
+        var results = await Task.WhenAll(Enumerable.Range(0, max + extra).Select(_ => Task.Run(
+            () => Sessions.CreateAsync(guest, "wf", "t", true, default))));
+
+        Assert.Equal(max, results.OfType<CreateSessionResult.Created>().Count());
+        Assert.Equal(extra, results.OfType<CreateSessionResult.GuestQuotaExceeded>().Count());
+        Assert.Equal(max, (await Guests.GetAsync(guest, default))!.SessionCount);
+        Assert.Equal(max, (await Sessions.ListAsync(guest, 50, null, default)).Items.Count);
+    }
+
+    [Fact]
+    public async Task Concurrent_turn_starts_on_one_session_are_Busy_or_quota_and_never_exceed_max_turns()
+    {
+        const int max = 2;
+        var guest = await NewGuestAsync(maxTurns: max);
+        var s = await GuestSessionAsync(guest);
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(
+            () => Sessions.TryStartTurnAsync(guest, s.Id, Msg.User(s.Id, "q", Now), true, default))));
+
+        Assert.Single(results.OfType<StartTurnResult.Started>()); // the lock admits one
+        Assert.Equal(8, results.Count(r => r is StartTurnResult.Started or StartTurnResult.Busy or StartTurnResult.GuestQuotaExceeded));
+        var turns = (await Guests.GetAsync(guest, default))!.TurnCount;
+        Assert.Equal(1, turns); // Busy and quota rejections consume nothing
+    }
+
+    [Fact]
+    public async Task Counters_increment_atomically_per_window_and_start_at_one()
+    {
+        var hour = new DateTimeOffset(2030, 1, 2, 3, 15, 0, TimeSpan.Zero) + TimeSpan.FromDays(Random.Shared.Next(1, 3000));
+        Assert.Equal(1, await Guests.IncrementCounterAsync(GuestCounter.TurnsPerHour, hour, default));
+        Assert.Equal(2, await Guests.IncrementCounterAsync(GuestCounter.TurnsPerHour, hour.AddMinutes(30), default));
+        Assert.Equal(1, await Guests.IncrementCounterAsync(GuestCounter.TurnsPerHour, hour.AddHours(1), default)); // next hour
+        Assert.Equal(1, await Guests.IncrementCounterAsync(GuestCounter.TurnsPerDay, hour, default)); // other counter
+        Assert.Equal(1, await Guests.IncrementCounterAsync(GuestCounter.CreationsPerHour, hour, default));
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => Guests.IncrementCounterAsync(GuestCounter.TurnsPerDay, hour, default)));
+        Assert.Equal(Enumerable.Range(2, 20).Select(i => (long)i), results.OrderBy(x => x));
     }
 }

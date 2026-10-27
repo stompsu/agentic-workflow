@@ -9,12 +9,17 @@ export interface ApiClientOptions {
   getToken: (forceRefresh?: boolean) => Promise<string>;
   /** Called when a request is still 401 after one forced token refresh: the app goes back to the login page. */
   onAuthFailure: () => void;
+  /** True while the token is a guest token (ADR 0006): a 401 `unauthorized` is retried once after 1 s, without refresh. */
+  isGuest?: () => boolean;
+  /** Called on 401 `guest_expired`: the guest identity ended. The app clears the token and shows the login page. */
+  onGuestEnded?: () => void;
   fetchImpl?: typeof fetch;
   /** Abortable delay; injectable for tests. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 export const TURN_IN_PROGRESS_RETRY_MS = 1000;
+export const GUEST_UNAUTHORIZED_RETRY_MS = 1000;
 export const DELETE_MY_DATA_MAX_ATTEMPTS = 5;
 
 export function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -45,8 +50,10 @@ export class ApiClient {
   }
 
   /**
-   * fetch with `Authorization: Bearer` on every call. 401: refresh the token once (forceRefresh) and retry;
-   * still 401 -> onAuthFailure (redirect to login) and ApiError(unauthorized).
+   * fetch with `Authorization: Bearer` on every call (also the SSE POST). 401 handling by ProblemDetails `code`:
+   * - `guest_expired`: no refresh, no retry; onGuestEnded; ApiError(401, guest_expired).
+   * - `unauthorized` in guest mode: one retry after 1 s with the same token, then onAuthFailure.
+   * - `unauthorized` in social mode: refresh the token once (forceRefresh) and retry; still 401 -> onAuthFailure.
    */
   private async authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
     const send = async (forceRefresh: boolean): Promise<Response> => {
@@ -61,9 +68,31 @@ export class ApiClient {
       }
     };
 
+    // A 401 body is read (not just cancelled) because its ProblemDetails `code` decides what happens next.
+    const guestEnded = async (response: Response): Promise<ApiError | null> => {
+      const err = await errorFromResponse(response);
+      if (err.code !== 'guest_expired') return null;
+      // The guest identity is gone: no refresh, no retry.
+      (this.options.onGuestEnded ?? this.options.onAuthFailure)();
+      return err;
+    };
+
     let response = await send(false);
     if (response.status === 401) {
-      await response.body?.cancel().catch(() => undefined);
+      const ended = await guestEnded(response);
+      if (ended) throw ended;
+      if (this.options.isGuest?.()) {
+        // Guest token: there is nothing to refresh. One retry after 1 s with the same token, then end guest mode.
+        await this.sleep(GUEST_UNAUTHORIZED_RETRY_MS, init.signal ?? undefined);
+        response = await send(false);
+        if (response.status === 401) {
+          const endedAgain = await guestEnded(response);
+          if (endedAgain) throw endedAgain;
+          this.options.onAuthFailure();
+          throw new ApiError({ status: 401, code: 'unauthorized' });
+        }
+        return response;
+      }
       try {
         response = await send(true);
       } catch (e) {
@@ -72,7 +101,8 @@ export class ApiClient {
         throw new ApiError({ status: 401, code: 'unauthorized' });
       }
       if (response.status === 401) {
-        await response.body?.cancel().catch(() => undefined);
+        const endedAgain = await guestEnded(response);
+        if (endedAgain) throw endedAgain;
         this.options.onAuthFailure();
         throw new ApiError({ status: 401, code: 'unauthorized' });
       }

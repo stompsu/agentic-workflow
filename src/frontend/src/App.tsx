@@ -5,7 +5,7 @@ import { ApiContext } from './api/ApiContext';
 import { ApiError } from './api/errors';
 import { AuthProvider } from './auth/AuthProvider';
 import { useAuth } from './auth/AuthContext';
-import { loadConfig, type AppConfig, type AppInfoConfig } from './config/config';
+import { loadConfig, type AppConfig, type AppInfoConfig, type ProviderConfig } from './config/config';
 import { LoginPage } from './components/LoginPage';
 import { Workspace } from './components/Workspace';
 
@@ -23,9 +23,20 @@ export function createQueryClient(): QueryClient {
 }
 
 /** Signed-in tree: a fresh QueryClient and ApiClient per sign-in so no data survives a sign-out. */
-export function Authenticated({ apiBaseUrl, title, info }: { apiBaseUrl: string; title?: string; info?: AppInfoConfig }) {
+export function Authenticated({
+  apiBaseUrl,
+  title,
+  info,
+  providers,
+}: {
+  apiBaseUrl: string;
+  title?: string;
+  info?: AppInfoConfig;
+  providers?: ProviderConfig[];
+}) {
   const auth = useAuth();
-  const { getToken, handleAuthFailure } = auth;
+  const { getToken, handleAuthFailure, handleGuestEnded, mode } = auth;
+  const isGuest = mode === 'guest';
   const [queryClient] = useState(createQueryClient);
   const api = useMemo(
     () =>
@@ -33,13 +44,15 @@ export function Authenticated({ apiBaseUrl, title, info }: { apiBaseUrl: string;
         baseUrl: apiBaseUrl,
         getToken,
         onAuthFailure: handleAuthFailure,
+        isGuest: () => isGuest,
+        onGuestEnded: handleGuestEnded,
       }),
-    [apiBaseUrl, getToken, handleAuthFailure],
+    [apiBaseUrl, getToken, handleAuthFailure, handleGuestEnded, isGuest],
   );
   return (
     <QueryClientProvider client={queryClient}>
       <ApiContext.Provider value={api}>
-        <Workspace {...(title !== undefined && { title })} {...(info !== undefined && { info })} />
+        <Workspace {...(title !== undefined && { title })} {...(info !== undefined && { info })} {...(providers !== undefined && { providers })} />
       </ApiContext.Provider>
     </QueryClientProvider>
   );
@@ -48,8 +61,10 @@ export function Authenticated({ apiBaseUrl, title, info }: { apiBaseUrl: string;
 function AuthGate({ config }: { config: AppConfig }) {
   const { status } = useAuth();
   if (status === 'loading') return <p className="center-note" role="status">Signing in...</p>;
-  if (status === 'anonymous') return <LoginPage providers={config.auth.providers} branding={config.branding} />;
-  return <Authenticated apiBaseUrl={config.apiBaseUrl} title={config.branding.title} info={config.info} />;
+  if (status === 'anonymous') {
+    return <LoginPage providers={config.auth.providers} branding={config.branding} guest={config.auth.guest} info={config.info} />;
+  }
+  return <Authenticated apiBaseUrl={config.apiBaseUrl} title={config.branding.title} info={config.info} providers={config.auth.providers} />;
 }
 
 export function App({ config }: { config: AppConfig }) {
@@ -57,7 +72,7 @@ export function App({ config }: { config: AppConfig }) {
     document.title = config.branding.title;
   }, [config.branding.title]);
   return (
-    <AuthProvider auth={config.auth}>
+    <AuthProvider auth={config.auth} apiBaseUrl={config.apiBaseUrl}>
       <AuthGate config={config} />
     </AuthProvider>
   );

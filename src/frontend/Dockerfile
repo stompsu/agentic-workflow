@@ -22,6 +22,8 @@ RUN apk add --no-cache jq \
  && chmod -R g+w /etc/nginx/conf.d /usr/share/nginx/html
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY nginx/snippets/ /etc/nginx/snippets/
+# http-context map for $client_ip and the access log format without client IPs (static, not a template).
+COPY --chown=nginx:root nginx/conf.d/client-ip-map.conf /etc/nginx/conf.d/client-ip-map.conf
 COPY docker-entrypoint.d/10-write-config.sh /docker-entrypoint.d/10-write-config.sh
 COPY --from=build --chown=nginx:root /app/dist/ /usr/share/nginx/html/
 RUN chmod 755 /docker-entrypoint.d/10-write-config.sh

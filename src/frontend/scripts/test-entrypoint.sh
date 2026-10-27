@@ -70,4 +70,30 @@ assert "200-char contact accepted" run_entrypoint "$WORK/ok200" APP_SUPPORT_CONT
 NL="$(printf 'a\nb')"
 refute "contact with newline rejected" run_entrypoint "$WORK/nl" APP_SUPPORT_CONTACT="$NL"
 
+# 4. guest keys
+d="$WORK/guest-default"
+run_entrypoint "$d"
+assert "guest disabled by default, default label" jq -e '.auth.guest == {"enabled": false, "label": "Continue as guest"} and (.app | has("guestSessionHours") | not) and (.app | has("guestRetentionHours") | not)' "$d/html/config.json"
+d="$WORK/guest-on"
+assert "guest enabled run succeeds" run_entrypoint "$d" AUTH_GUEST_ENABLED=true AUTH_GUEST_LABEL='Try it <now> & "go"' APP_GUEST_SESSION_HOURS=4 APP_GUEST_RETENTION_HOURS=5
+assert "guest keys reach config.json (label verbatim, hours numeric)" jq -e '.auth.guest == {"enabled": true, "label": "Try it <now> & \"go\""} and .app.guestSessionHours == 4 and .app.guestRetentionHours == 5' "$d/html/config.json"
+for v in yes TRUE 1 ' true'; do
+  refute "AUTH_GUEST_ENABLED='$v' rejected" run_entrypoint "$WORK/g" AUTH_GUEST_ENABLED="$v"
+done
+for v in 0 13 abc 01 -1 100; do
+  refute "APP_GUEST_SESSION_HOURS=$v rejected" run_entrypoint "$WORK/g" APP_GUEST_SESSION_HOURS="$v"
+done
+for v in 1 12; do
+  assert "APP_GUEST_SESSION_HOURS=$v accepted" run_entrypoint "$WORK/g" APP_GUEST_SESSION_HOURS="$v"
+done
+for v in 0 169 1000 abc 007; do
+  refute "APP_GUEST_RETENTION_HOURS=$v rejected" run_entrypoint "$WORK/g" APP_GUEST_RETENTION_HOURS="$v"
+done
+for v in 1 168; do
+  assert "APP_GUEST_RETENTION_HOURS=$v accepted" run_entrypoint "$WORK/g" APP_GUEST_RETENTION_HOURS="$v"
+done
+LONG61="$(awk 'BEGIN { for (i = 0; i < 61; i++) printf "a" }')"
+refute "61-char guest label rejected" run_entrypoint "$WORK/g" AUTH_GUEST_LABEL="$LONG61"
+refute "guest label with newline rejected" run_entrypoint "$WORK/g" AUTH_GUEST_LABEL="$NL"
+
 if [ "$FAILED" -eq 0 ]; then echo "entrypoint tests passed"; else echo "entrypoint tests FAILED" >&2; exit 1; fi

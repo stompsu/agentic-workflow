@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, describeApiError } from '../api/errors';
+import { ApiError, GUEST_LIMIT_TEXT, describeApiError } from '../api/errors';
 import { useApi } from '../api/ApiContext';
 import { queryKeys } from '../api/queryKeys';
 import type { Session } from '../api/types';
+import { useGuestLimits } from '../chat/guestLimits';
 
 interface Props {
   activeSessionId: string | null;
@@ -12,6 +13,8 @@ interface Props {
   onDeleted: (id: string) => void;
   /** Shown as retention info when configured. */
   retentionDays?: number;
+  /** Guest mode: replaces the retention note (hours after the last message). */
+  guestRetentionHours?: number;
 }
 
 const PAGE_SIZE = 20;
@@ -21,7 +24,8 @@ function formatDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export function Sidebar({ activeSessionId, onSelect, onNewChat, onDeleted, retentionDays }: Props) {
+export function Sidebar({ activeSessionId, onSelect, onNewChat, onDeleted, retentionDays, guestRetentionHours }: Props) {
+  const limits = useGuestLimits();
   const api = useApi();
   const qc = useQueryClient();
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -56,9 +60,14 @@ export function Sidebar({ activeSessionId, onSelect, onNewChat, onDeleted, reten
 
   return (
     <nav className="sidebar" aria-label="Conversation history">
-      <button type="button" className="btn btn-block" onClick={onNewChat}>
+      <button type="button" className="btn btn-block" disabled={limits.sessionsExhausted} aria-describedby={limits.sessionsExhausted ? 'new-chat-hint' : undefined} onClick={onNewChat}>
         New chat
       </button>
+      {limits.sessionsExhausted && (
+        <p id="new-chat-hint" className="hint">
+          {GUEST_LIMIT_TEXT}
+        </p>
+      )}
       {deleteError && (
         <p role="alert" className="error-text">
           {deleteError}
@@ -107,7 +116,11 @@ export function Sidebar({ activeSessionId, onSelect, onNewChat, onDeleted, reten
           {query.isFetchingNextPage ? 'Loading...' : 'Load more'}
         </button>
       )}
-      {retentionDays !== undefined && <p className="hint">Chats are kept for {retentionDays} days after last activity.</p>}
+      {guestRetentionHours !== undefined ? (
+        <p className="hint">Guest chats are deleted automatically within {guestRetentionHours} hours after your last message.</p>
+      ) : (
+        retentionDays !== undefined && <p className="hint">Chats are kept for {retentionDays} days after last activity.</p>
+      )}
     </nav>
   );
 }

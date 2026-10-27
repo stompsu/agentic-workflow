@@ -324,7 +324,7 @@ public class SessionEndpointTests : IDisposable
         var message = new SupportChat.Core.Storage.MessageRecord(
             Guid.CreateVersion7().ToString(), sessionId, Microsoft.Extensions.AI.ChatRole.User, text, _factory.Time.GetUtcNow(),
             SupportChat.Core.Storage.MessageStatus.Complete, null, null, [], null, null);
-        var result = await _factory.Store.TryStartTurnAsync(user, sessionId, message, default);
+        var result = await _factory.Store.TryStartTurnAsync(user, sessionId, message, false, default);
         return Assert.IsType<SupportChat.Core.Storage.StartTurnResult.Started>(result).Lease;
     }
 

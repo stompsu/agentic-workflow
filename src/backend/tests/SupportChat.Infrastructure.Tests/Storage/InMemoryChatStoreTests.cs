@@ -15,6 +15,14 @@ public class InMemoryChatStoreTests : StoreContract
 
     protected override IMessageStore Messages => _store;
 
+    protected override IGuestStore Guests => _store;
+
+    protected override Task RemoveGuestDocumentAsync(string guestUserId)
+    {
+        _store.RemoveGuestDocument(guestUserId);
+        return Task.CompletedTask;
+    }
+
     protected override DateTimeOffset Now => _time.GetUtcNow();
 
     protected override void Advance(TimeSpan by) => _time.Advance(by);

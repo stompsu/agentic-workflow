@@ -1,6 +1,29 @@
 # ADR 0001: Identity flow (SPA token -> API -> `oid` -> Cosmos partition key)
 
 Status: Accepted (Phase 0, revised 2026-10-25; D4, D6, D7 and D10 applied 2026-10-25). Skill: external-social-auth.
+Revised 2026-10-27 by ADR 0006 (guest access, accepted): see "Revision 2026-10-27: guest tokens" below. Everything
+else in this ADR is unchanged and still applies to Entra users.
+
+## Revision 2026-10-27: guest tokens (ADR 0006)
+
+ADR 0006 adds a second accepted token kind. The identity flow above stays the rule for Entra users; for guests:
+- The API issues ONE guest JWT per guest (`POST /api/guest/token`, ES256, signed with a Key Vault key through the
+  managed identity; `exp` = end of the guest identity, max 4 h, no refresh). The backend still runs no login flow and
+  stores no credentials.
+- The default scheme becomes a policy scheme (`ApiBearer`) that routes by the token's unvalidated `iss` to either the
+  existing Microsoft.Identity.Web scheme (unchanged) or a `Guest` JwtBearer scheme (registered only when
+  `Guest:Enabled`), which stamps `AuthenticationType = "guest"`.
+- The principal's kind (Entra or Guest) comes only from the validating scheme (`AuthenticationType` + validated `iss`),
+  never from token content. `oid` is an Entra GUID for Entra principals and `guest-<guid>` for guest principals; any
+  other combination is 403.
+- The `ChatUser` policy and the fallback policy become `RequireAuthenticatedUser()` + `ChatUserRequirement`
+  (Entra: scope `access_as_user` + GUID `oid`, as before; Guest: guest issuer + guest id, no scope).
+- `ICurrentUser.UserId` is still the `oid` claim and still the Cosmos partition key; `ICurrentUser.IsGuest` is added.
+  Data scoping, the 404-not-403 rule and the isolation tests below apply unchanged; guest partitions are disjoint from
+  Entra partitions because the id formats are disjoint.
+- Guest tokens live in the SPA's `sessionStorage` (with hand-off between open tabs), like the MSAL cache.
+CLAUDE.md is amended by the user with the text in ADR 0006 section 3.2 (approved 2026-10-27; must land before merge).
+Details: /docs/adr/0006-guest-access.md sections 3-5; contract: api-contract sections 1, 2.9, 3.
 
 ## Context
 

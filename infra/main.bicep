@@ -63,6 +63,28 @@ param orchestratorDeployment string = ''
 @description('Chat model deployment for the Policy, Claims and HealthAssessments specialists (D8). Empty = env vars not set.')
 param specialistDeployment string = ''
 
+// ---- guest access (ADR 0006 sections 11-12; dev true, test true, prod false) ---------------------------------------
+@description('Enable "Continue as guest": backend Guest__Enabled, frontend AUTH_GUEST_ENABLED, the Key Vault signing key guest-token-signing and the Crypto User role. Prod stays false until the ADR 0006 prod preconditions (CAPTCHA, role) are met.')
+param guestAccessEnabled bool = false
+@description('Prod only: explicit acknowledgement that the ADR 0006 prod preconditions are met (G7 CAPTCHA in place and the prod Key Vault Crypto User role approved). Required to enable guests in prod: main.bicep fails and check-params.sh rejects guestAccessEnabled=true without it. Ignored in dev/test.')
+param guestProdPreconditionsAck bool = false
+@description('Guest identity lifetime in hours: backend Guest__MaxLifetime, frontend APP_GUEST_SESSION_HOURS (1..12).')
+@minValue(1)
+@maxValue(12)
+param guestMaxLifetimeHours int = 4
+@description('Guest data TTL in minutes: backend Guest__DataTtl; must be >= guestMaxLifetimeHours*60 + 5 (255 = 4 h 15 min). Frontend APP_GUEST_RETENTION_HOURS = this rounded up to whole hours.')
+@minValue(35)
+@maxValue(10080)
+param guestDataTtlMinutes int = 255
+@description('Optional caps (null = backend default): Guest__MaxCreationsPerHour (200), Guest__MaxTurns (30), Guest__MaxSessions (5), Guest__MaxTurnsPerHour (300), Guest__MaxTurnsPerDay (2000).')
+param guestMaxCreationsPerHour int?
+param guestMaxTurns int?
+param guestMaxSessions int?
+param guestMaxTurnsPerHour int?
+param guestMaxTurnsPerDay int?
+@description('Operator email for the guest signing key alert (deploy-time value, not a secret, never committed). Required when guestAccessEnabled is true (check-params.sh enforces it).')
+param alertEmail string = ''
+
 // ---- Foundry / models (referenced, never created) ------------------------------------------------------------------
 @description('Resource id of an existing Foundry project. Empty = no "Azure AI User" assignment.')
 param foundryProjectResourceId string = ''
@@ -98,6 +120,14 @@ var useKeys = !isProd                 // Key mode: dev and test (Azure__AuthMode
 var grantDataRoles = isProd || isTest // data-plane roles for the app identity (test: for the MI smoke job)
 var aspNetEnvironment = environmentName == 'dev' ? 'Dev' : (isTest ? 'Test' : 'Production')
 var ingestionEnabled = deployIngestionJob && !empty(ingestionImage)
+// Prod guard: guests in prod need the ADR 0006 preconditions acknowledged (fail() aborts template evaluation).
+var guestOn = (isProd && guestAccessEnabled && !guestProdPreconditionsAck) ? fail('guestAccessEnabled=true in prod requires guestProdPreconditionsAck=true (G7 CAPTCHA + prod Key Vault Crypto User role, ADR 0006).') : guestAccessEnabled
+var guestKeyName = 'guest-token-signing'
+var guestLifetime = '${padLeft(string(guestMaxLifetimeHours), 2, '0')}:00:00'
+var guestTtlDays = guestDataTtlMinutes / 1440
+var guestTtlTime = '${padLeft(string((guestDataTtlMinutes % 1440) / 60), 2, '0')}:${padLeft(string(guestDataTtlMinutes % 60), 2, '0')}:00'
+var guestDataTtl = guestTtlDays > 0 ? '${guestTtlDays}.${guestTtlTime}' : guestTtlTime
+var guestRetentionHours = (guestDataTtlMinutes + 59) / 60
 var base = '${namePrefix}-${environmentName}'
 var uniq = take(uniqueString(resourceGroup().id), 5)
 var tags = { app: 'supportchat', environment: environmentName }
@@ -111,6 +141,18 @@ var registryServer = '${acrName}${environment().suffixes.acrLoginServer}'
 module monitoring 'modules/monitoring.bicep' = {
   name: 'monitoring'
   params: { name: base, location: location, tags: tags }
+}
+
+// Guest signing key alert + email action group (only when guests are on and an address is supplied).
+module guestAlert 'modules/guest-alert.bicep' = if (guestOn && !empty(alertEmail)) {
+  name: 'guest-alert'
+  params: {
+    name: base
+    location: location
+    tags: tags
+    appInsightsId: monitoring.outputs.appInsightsId
+    alertEmail: alertEmail
+  }
 }
 
 module identity 'modules/identity.bicep' = {
@@ -152,6 +194,10 @@ module keyVault 'modules/keyvault.bicep' = {
     enablePurgeProtection: isProd
     kvReaderPrincipalId: useKeys ? identity.outputs.principalId : ''
     additionalSecretsUserPrincipalIds: useKeys && ingestionEnabled ? [ ingestionIdentity.?outputs.principalId ?? '' ] : []
+    // Independent of the secrets role: prod has no Secrets User but needs Crypto User once guests are enabled.
+    cryptoUserPrincipalId: guestOn ? identity.outputs.principalId : ''
+    createGuestSigningKey: guestOn
+    guestSigningKeyName: guestKeyName
   }
 }
 
@@ -255,10 +301,30 @@ var baseEnv = [
   { name: 'Cosmos__ContainerName', value: cosmos.outputs.containerName }
   { name: 'Search__Endpoint', value: search.outputs.endpoint }
   { name: 'Search__IndexName', value: searchIndexName }
-  { name: 'Workflows__Echo__Enabled', value: string(echoWorkflowEnabled) }
+  { name: 'Workflows__Echo__Enabled', value: echoWorkflowEnabled ? 'true' : 'false' }
   { name: 'Chat__RetentionDays', value: string(chatRetentionDays) }
   { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'appinsights-connection' }
 ]
+// Guest access (ADR 0006 section 11). When disabled only Guest__Enabled=false and Guest__DataTtl (leftover data retention) are set.
+var guestEnv = concat(
+  [
+    { name: 'Guest__Enabled', value: guestOn ? 'true' : 'false' }
+    { name: 'Guest__DataTtl', value: guestDataTtl }
+  ],
+  guestOn ? concat([
+    { name: 'Guest__SigningMode', value: 'KeyVault' }
+    { name: 'Guest__SigningKeyUri', value: '${keyVault.outputs.vaultUri}keys/${guestKeyName}' }
+    { name: 'Guest__Issuer', value: 'supportchat-guest-${environmentName}' }
+    { name: 'Guest__MaxLifetime', value: guestLifetime }
+    { name: 'Guest__TrustClientIpHeader', value: 'true' }
+  ],
+    guestMaxCreationsPerHour == null ? [] : [ { name: 'Guest__MaxCreationsPerHour', value: string(guestMaxCreationsPerHour) } ],
+    guestMaxTurns == null ? [] : [ { name: 'Guest__MaxTurns', value: string(guestMaxTurns) } ],
+    guestMaxSessions == null ? [] : [ { name: 'Guest__MaxSessions', value: string(guestMaxSessions) } ],
+    guestMaxTurnsPerHour == null ? [] : [ { name: 'Guest__MaxTurnsPerHour', value: string(guestMaxTurnsPerHour) } ],
+    guestMaxTurnsPerDay == null ? [] : [ { name: 'Guest__MaxTurnsPerDay', value: string(guestMaxTurnsPerDay) } ]
+  ) : []
+)
 var authModeEnv = [
   { name: 'Azure__AuthMode', value: useKeys ? 'Key' : 'ManagedIdentity' }
 ]
@@ -301,7 +367,7 @@ module backend 'modules/containerapp.bicep' = {
     maxReplicas: backendMaxReplicas
     concurrentRequests: backendConcurrentRequests
     enableHealthProbes: !backendIsPlaceholder
-    env: concat(baseEnv, authModeEnv, foundryEnv, workflowEnv, keyEnv)
+    env: concat(baseEnv, authModeEnv, foundryEnv, workflowEnv, keyEnv, guestEnv)
     secrets: keyVaultSecrets
     inlineSecretName: 'appinsights-connection'
     inlineSecretValue: monitoring.outputs.appInsightsConnectionString
@@ -315,7 +381,12 @@ var frontendEnv = concat([
   { name: 'AUTH_AUTHORITY', value: spaAuthority }
   { name: 'AUTH_API_SCOPE', value: apiScope }
   { name: 'APP_RETENTION_DAYS', value: string(chatRetentionDays) }
+  { name: 'AUTH_GUEST_ENABLED', value: guestOn ? 'true' : 'false' }
 ],
+  guestOn ? [
+    { name: 'APP_GUEST_SESSION_HOURS', value: string(guestMaxLifetimeHours) }
+    { name: 'APP_GUEST_RETENTION_HOURS', value: string(guestRetentionHours) }
+  ] : [],
   empty(authProviders) ? [] : [ { name: 'AUTH_PROVIDERS', value: authProviders } ],
   empty(supportContact) ? [] : [ { name: 'APP_SUPPORT_CONTACT', value: supportContact } ]
 )
@@ -345,7 +416,8 @@ var smokeEnv = concat(
   filter(baseEnv, e => !contains(e, 'secretRef')),
   [ { name: 'Azure__AuthMode', value: 'ManagedIdentity' } ],
   foundryEnv,
-  workflowEnv
+  workflowEnv,
+  guestEnv
 )
 module smokeJob 'modules/smoke-job.bicep' = if (isTest && deploySmokeJob && !backendIsPlaceholder) {
   name: 'smoke-job'
@@ -407,6 +479,7 @@ output frontendAppName string = frontend.outputs.name
 output frontendFqdn string = frontend.outputs.fqdn
 output managedIdentityClientId string = identity.outputs.clientId
 output keyVaultName string = keyVault.outputs.name
+output guestSigningKeyName string = keyVault.outputs.guestSigningKeyName
 output cosmosAccountName string = cosmos.outputs.name
 output searchServiceName string = search.outputs.name
 output searchPrincipalId string = search.outputs.principalId

@@ -1,5 +1,6 @@
 using System.Globalization;
 using SupportChat.Api.Contracts;
+using SupportChat.Api.Guests;
 using SupportChat.Api.Http;
 using SupportChat.Core.Security;
 using SupportChat.Core.Storage;
@@ -23,7 +24,8 @@ public static class SessionEndpoints
     }
 
     private static async Task<IResult> CreateAsync(
-        HttpContext http, ICurrentUser user, IWorkflowRegistry registry, ISessionStore sessions, CancellationToken ct)
+        HttpContext http, ICurrentUser user, IWorkflowRegistry registry, ISessionStore sessions,
+        GuestWorkflowPolicy guestWorkflows, GuestActivityCache guestActivity, CancellationToken ct)
     {
         var (body, error) = await RequestBody.ReadJsonAsync<CreateSessionRequest>(http);
         if (error is not null)
@@ -37,8 +39,9 @@ public static class SessionEndpoints
         {
             errors["workflowId"] = ["WorkflowId is required."];
         }
-        else if (!registry.TryGet(workflowId, out _))
+        else if (!registry.TryGet(workflowId, out _) || (user.IsGuest && !guestWorkflows.IsAllowed(workflowId)))
         {
+            // A workflow not enabled for guests is reported exactly like an unknown id (api-contract 2.9).
             errors["workflowId"] = ["WorkflowId is not a registered workflow."];
         }
 
@@ -57,9 +60,19 @@ public static class SessionEndpoints
             return Problems.Create(StatusCodes.Status400BadRequest, Problems.Codes.ValidationFailed, errors);
         }
 
-        var session = await sessions.CreateAsync(user.UserId, workflowId!, title, ct);
-        return Results.Json(session.ToDto(), ApiJson.Options, statusCode: StatusCodes.Status201Created)
-            .WithLocation($"/api/sessions/{session.Id}");
+        // One transaction for a guest: session create + conditional patch of the guest document (sessionCount < maxSessions).
+        var created = await sessions.CreateAsync(user.UserId, workflowId!, title, user.IsGuest, ct);
+        switch (created)
+        {
+            case CreateSessionResult.Created c:
+                return Results.Json(c.Session.ToDto(), ApiJson.Options, statusCode: StatusCodes.Status201Created)
+                    .WithLocation($"/api/sessions/{c.Session.Id}");
+            case CreateSessionResult.GuestQuotaExceeded:
+                return Problems.GuestQuotaExceeded();
+            default:
+                guestActivity.MarkEnded(user.UserId, GuestActivityFilter.TokenExpiry(http));
+                return Problems.GuestExpired();
+        }
     }
 
     private static async Task<IResult> ListAsync(

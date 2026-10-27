@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using SupportChat.Api.Guests;
 using SupportChat.Api.Http;
 using SupportChat.Core.Options;
 using SupportChat.Core.Security;
@@ -11,7 +12,8 @@ public static class MeEndpoints
     public static void MapMeEndpoints(this RouteGroupBuilder api)
     {
         // No rate limiter on purpose (api-contract 2.8); never 404 or 409.
-        api.MapDelete("/me/data", DeleteDataAsync);
+        // A guest may always delete: an ended guest gets 204 too, so the activity check is skipped here (api-contract 2.9).
+        api.MapDelete("/me/data", DeleteDataAsync).WithMetadata(SkipGuestActivityCheck.Instance);
     }
 
     /// <summary>
@@ -20,10 +22,17 @@ public static class MeEndpoints
     /// Unexpected failures reach the exception handler (500 internal_error); progress is kept either way.
     /// </summary>
     private static async Task<IResult> DeleteDataAsync(
-        ICurrentUser user, ISessionStore sessions, IOptions<ChatLimitsOptions> limits, ILogger<DeleteDataLog> logger, CancellationToken ct)
+        HttpContext http, ICurrentUser user, ISessionStore sessions, GuestActivityCache guestActivity, IOptions<ChatLimitsOptions> limits,
+        ILogger<DeleteDataLog> logger, CancellationToken ct)
     {
         var userId = user.UserId;
         var result = await sessions.DeleteAllUserDataAsync(userId, limits.Value.DeleteUserDataBudget, ct);
+        if (user.IsGuest && result == DeleteUserDataResult.Completed)
+        {
+            // The store deleted the guest document last: this replica stops trusting its cached "active" entry at once.
+            guestActivity.Invalidate(userId, GuestActivityFilter.TokenExpiry(http));
+        }
+
         logger.LogInformation("Delete my data finished with {Result}, enduser.id {EndUserId}", result, userId);
         return result == DeleteUserDataResult.Completed ? Results.NoContent() : Problems.DeletionIncomplete();
     }

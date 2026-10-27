@@ -10,6 +10,10 @@ export type ApiErrorCode =
   | 'unsupported_media_type'
   | 'rate_limited'
   | 'deletion_incomplete'
+  | 'guest_expired'
+  | 'guest_quota_exceeded'
+  | 'guest_access_disabled'
+  | 'bot_check_failed'
   | 'internal_error'
   | 'network_error'
   | 'aborted'
@@ -36,6 +40,8 @@ export function isAbortError(e: unknown): boolean {
   return (e instanceof DOMException && e.name === 'AbortError') || (e instanceof ApiError && e.code === 'aborted');
 }
 
+export const GUEST_LIMIT_TEXT = 'You have reached the guest limit. Sign in to keep chatting.';
+
 /** User-facing text per code. The server `title`/`detail` are never shown. */
 const MESSAGES: Record<string, string> = {
   validation_failed: 'Your request was not accepted. Check the message and try again.',
@@ -49,6 +55,10 @@ const MESSAGES: Record<string, string> = {
   rate_limited: 'You are sending messages too quickly.',
   deletion_incomplete: 'Deleting your data is taking longer than expected. Please try again in a minute.',
   internal_error: 'Something went wrong. Please try again.',
+  guest_expired: 'Your guest session has ended.',
+  guest_quota_exceeded: GUEST_LIMIT_TEXT,
+  guest_access_disabled: 'Guest access is not available right now.',
+  bot_check_failed: 'Guest sign-in could not be verified. Please try again.',
   network_error: 'Could not reach the server. Check your connection and try again.',
 };
 

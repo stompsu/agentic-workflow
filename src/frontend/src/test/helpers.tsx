@@ -98,6 +98,11 @@ export function fakeAuth(over: Partial<AuthContextValue> = {}): AuthContextValue
     logout: async () => undefined,
     getToken: async () => 'test-token',
     handleAuthFailure: () => undefined,
+    mode: 'social',
+    loginAsGuest: async () => undefined,
+    endGuest: () => undefined,
+    guestNotice: null,
+    handleGuestEnded: () => undefined,
     ...over,
   };
 }

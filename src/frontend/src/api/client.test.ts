@@ -141,4 +141,101 @@ describe('ApiClient', () => {
     const events = await drain(makeClient(fetchImpl).sendMessage('s-1', 'x'));
     expect(events.map((e) => e.type)).toEqual(['session', 'error']);
   });
+
+  describe('guest tokens (ADR 0006)', () => {
+    it('401 guest_expired: no refresh, no retry, onGuestEnded once, ApiError guest_expired', async () => {
+      const getToken = vi.fn(async () => 'guest-token');
+      const sleep = vi.fn(async () => undefined);
+      const { fetchImpl, calls } = fakeBackend({ 'GET /api/workflows': () => problem(401, 'guest_expired') });
+      const onGuestEnded = vi.fn();
+      const onAuthFailure = vi.fn();
+      const api = makeClient(fetchImpl, { getToken, sleep, isGuest: () => true, onGuestEnded, onAuthFailure });
+      await expect(api.listWorkflows()).rejects.toMatchObject({ status: 401, code: 'guest_expired' });
+      expect(calls).toHaveLength(1);
+      expect(getToken).toHaveBeenCalledTimes(1);
+      expect(getToken).toHaveBeenCalledWith(false);
+      expect(sleep).not.toHaveBeenCalled();
+      expect(onGuestEnded).toHaveBeenCalledTimes(1);
+      expect(onAuthFailure).not.toHaveBeenCalled();
+    });
+
+    it('401 guest_expired on the SSE fetch: no retry, onGuestEnded, the generator throws guest_expired', async () => {
+      const { fetchImpl, calls } = fakeBackend({ 'POST /api/sessions/s-1/messages': () => problem(401, 'guest_expired') });
+      const onGuestEnded = vi.fn();
+      const api = makeClient(fetchImpl, { isGuest: () => true, onGuestEnded });
+      await expect(drain(api.sendMessage('s-1', 'hi'))).rejects.toMatchObject({ code: 'guest_expired' });
+      expect(calls).toHaveLength(1);
+      expect(onGuestEnded).toHaveBeenCalledTimes(1);
+    });
+
+    it('401 unauthorized in guest mode: one retry after 1 s with the SAME token, no forceRefresh', async () => {
+      const getToken = vi.fn<(force?: boolean) => Promise<string>>(async () => 'guest-token');
+      const sleep = vi.fn<(ms: number, signal?: AbortSignal) => Promise<void>>(async () => undefined);
+      let n = 0;
+      const { fetchImpl, calls } = fakeBackend({
+        'GET /api/workflows': () => (n++ === 0 ? problem(401, 'unauthorized') : json({ items: [] })),
+      });
+      const onAuthFailure = vi.fn();
+      const api = makeClient(fetchImpl, { getToken, sleep, isGuest: () => true, onAuthFailure });
+      expect(await api.listWorkflows()).toEqual([]);
+      expect(sleep).toHaveBeenCalledWith(1000, undefined);
+      expect(getToken.mock.calls.every(([force]) => force === false)).toBe(true);
+      expect(calls.map((c) => c.headers.get('Authorization'))).toEqual(['Bearer guest-token', 'Bearer guest-token']);
+      expect(onAuthFailure).not.toHaveBeenCalled();
+    });
+
+    it('401 unauthorized twice in guest mode: ends guest mode (onAuthFailure) after exactly two requests', async () => {
+      const { fetchImpl, calls } = fakeBackend({ 'GET /api/workflows': () => problem(401, 'unauthorized') });
+      const onAuthFailure = vi.fn();
+      const onGuestEnded = vi.fn();
+      const api = makeClient(fetchImpl, { isGuest: () => true, onAuthFailure, onGuestEnded });
+      await expect(api.listWorkflows()).rejects.toMatchObject({ code: 'unauthorized' });
+      expect(calls).toHaveLength(2);
+      expect(onAuthFailure).toHaveBeenCalledTimes(1);
+      expect(onGuestEnded).not.toHaveBeenCalled();
+    });
+
+    it('guest_expired on the retry also ends the guest without another retry', async () => {
+      let n = 0;
+      const { fetchImpl, calls } = fakeBackend({
+        'GET /api/workflows': () => (n++ === 0 ? problem(401, 'unauthorized') : problem(401, 'guest_expired')),
+      });
+      const onGuestEnded = vi.fn();
+      const api = makeClient(fetchImpl, { isGuest: () => true, onGuestEnded });
+      await expect(api.listWorkflows()).rejects.toMatchObject({ code: 'guest_expired' });
+      expect(calls).toHaveLength(2);
+      expect(onGuestEnded).toHaveBeenCalledTimes(1);
+    });
+
+    it('the retry delay is abortable (the abort signal reaches sleep)', async () => {
+      const sleep = vi.fn<(ms: number, signal?: AbortSignal) => Promise<void>>(async () => {
+        throw new DOMException('Aborted', 'AbortError');
+      });
+      const { fetchImpl, calls } = fakeBackend({ 'GET /api/workflows': () => problem(401, 'unauthorized') });
+      const api = makeClient(fetchImpl, { sleep, isGuest: () => true });
+      const c = new AbortController();
+      await expect(api.listWorkflows(c.signal)).rejects.toMatchObject({ name: 'AbortError' });
+      expect(sleep.mock.calls[0]?.[1]).toBe(c.signal);
+      expect(calls).toHaveLength(1);
+    });
+
+    it('social mode is unchanged: forceRefresh once, then onAuthFailure', async () => {
+      const getToken = vi.fn(async (force?: boolean) => (force ? 'fresh' : 'stale'));
+      const { fetchImpl, calls } = fakeBackend({ 'GET /api/workflows': () => problem(401, 'unauthorized') });
+      const onAuthFailure = vi.fn();
+      const api = makeClient(fetchImpl, { getToken, onAuthFailure, isGuest: () => false });
+      await expect(api.listWorkflows()).rejects.toMatchObject({ code: 'unauthorized' });
+      expect(calls).toHaveLength(2);
+      expect(getToken).toHaveBeenNthCalledWith(2, true);
+      expect(onAuthFailure).toHaveBeenCalledTimes(1);
+    });
+
+    it('guest_quota_exceeded is mapped without Retry-After; guest messages are described', async () => {
+      const { fetchImpl } = fakeBackend({ 'POST /api/sessions': () => problem(429, 'guest_quota_exceeded') });
+      const err = await makeClient(fetchImpl, { isGuest: () => true }).createSession({ workflowId: 'w' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err).toMatchObject({ status: 429, code: 'guest_quota_exceeded' });
+      expect(describeApiError(err as ApiError)).toBe('You have reached the guest limit. Sign in to keep chatting.');
+    });
+  });
 });

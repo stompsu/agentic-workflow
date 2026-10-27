@@ -96,8 +96,8 @@ public sealed class ControlledStore(InMemoryChatStore inner) : ISessionStore, IM
 
     public List<(TurnLease Lease, MessageRecord? Message)> Completes { get; } = [];
 
-    public Task<SessionRecord> CreateAsync(string userId, string workflowId, string? title, CancellationToken ct) =>
-        inner.CreateAsync(userId, workflowId, title, ct);
+    public Task<CreateSessionResult> CreateAsync(string userId, string workflowId, string? title, bool enforceGuestQuota, CancellationToken ct) =>
+        inner.CreateAsync(userId, workflowId, title, enforceGuestQuota, ct);
 
     public Task<SessionRecord?> GetAsync(string userId, string sessionId, CancellationToken ct) => inner.GetAsync(userId, sessionId, ct);
 
@@ -110,8 +110,8 @@ public sealed class ControlledStore(InMemoryChatStore inner) : ISessionStore, IM
     public Task<DeleteUserDataResult> DeleteAllUserDataAsync(string userId, TimeSpan budget, CancellationToken ct) =>
         inner.DeleteAllUserDataAsync(userId, budget, ct);
 
-    public Task<StartTurnResult> TryStartTurnAsync(string userId, string sessionId, MessageRecord userMessage, CancellationToken ct) =>
-        inner.TryStartTurnAsync(userId, sessionId, userMessage, ct);
+    public Task<StartTurnResult> TryStartTurnAsync(string userId, string sessionId, MessageRecord userMessage, bool enforceGuestQuota, CancellationToken ct) =>
+        inner.TryStartTurnAsync(userId, sessionId, userMessage, enforceGuestQuota, ct);
 
     public Task<CompleteTurnResult> CompleteTurnAsync(string userId, TurnLease lease, MessageRecord? assistantMessage, CancellationToken ct)
     {
@@ -142,10 +142,11 @@ public sealed class ControlledStore(InMemoryChatStore inner) : ISessionStore, IM
 /// <summary>The real app with a scripted workflow, a failure-injecting store and a fake clock.</summary>
 public sealed class ChatHost : IDisposable
 {
-    public ChatHost(Action<Dictionary<string, string?>>? configure = null)
+    public ChatHost(Action<Dictionary<string, string?>>? configure = null, Action<IServiceCollection>? extraServices = null, string environment = "Test")
     {
         ApiFactory? factory = null;
         Factory = factory = new ApiFactory(
+            environment,
             configure: c =>
             {
                 c["Foundry:ProjectEndpoint"] = "https://example.invalid/api/projects/p";
@@ -159,6 +160,7 @@ public sealed class ChatHost : IDisposable
                 s.RemoveAll<IMessageStore>();
                 s.AddSingleton<ISessionStore>(Control);
                 s.AddSingleton<IMessageStore>(Control);
+                extraServices?.Invoke(s);
             });
         User = TestTokens.NewOid();
         Client = Factory.CreateAuthorizedClient(User);

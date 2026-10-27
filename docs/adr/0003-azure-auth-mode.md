@@ -3,6 +3,8 @@
 Status: Accepted (revised 2026-10-25). Decision D5 (managed identity for Foundry in all deployed environments, no
 service-principal secret) is Decided; `.claude/agents/azure-infra.md` is aligned. Skill: azure-auth-switch.
 2026-10-25: rules 9-10 added (D7 retention / delete-my-data config); D8 resolved (Foundry inputs supplied by the user).
+2026-10-27: rules 12-17 added (ADR 0006 guest access, accepted); rule 11 is left to the local-mode ADR 0005 (other
+branch). Guest token signing does not use `Azure:AuthMode`; rules 1-10 are unchanged.
 
 ## Context
 
@@ -100,6 +102,32 @@ Environment names and `AuthMode` values are compared case-insensitively (`String
     240 s ingress timeout, api-contract 2.8).
 Rules 9-10 run in the API host only (web app and `--smoke-check`), not in the ingestion console app.
 
+Guest access (ADR 0006 section 11, accepted 2026-10-27). Rules 12-17 apply only when `Guest:Enabled = true`; when it
+is false the other `Guest:*` keys are ignored, except `Guest:DataTtl` (default `04:15:00`): the retention policy still
+uses it for leftover guest data (data-model 1.3), so its range `00:35:00`..`7.00:00:00` is checked in every case. Like rules 9-10 they run in the API host only (web app and `--smoke-check`).
+12. `Guest:Issuer` missing, not matching `^[a-z0-9-]{3,64}$` (so it can never be an Entra issuer, which is always an
+    https URL), or equal to any issuer the Entra scheme accepts (derived from `AzureAd:Instance` / `AzureAd:TenantId`,
+    or configured explicitly).
+13. `Guest:Audience` not matching `^[a-z0-9-]{3,64}$`, or the audiences overlap in either direction: `Guest:Audience`
+    equals `AzureAd:ClientId`, `api://<ClientId>` or any configured `AzureAd:Audience(s)`, or any valid audience of the
+    Entra scheme equals `Guest:Audience`.
+14. `Guest:SigningMode` not `KeyVault`/`Ephemeral`, or `Ephemeral` and the environment is not `Development` (so it
+    always fails in `Production`).
+15. `Guest:SigningMode = KeyVault` and `Guest:SigningKeyUri` missing, not `https`, host not ending in
+    `.vault.azure.net`, or path not exactly `/keys/<name>` (versionless; a version segment fails startup).
+16. A value outside its range: `Guest:SigningKeyRefreshInterval` `00:05:00`..`01:00:00`; `Guest:MaxLifetime`
+    `00:30:00`..`12:00:00`; `Guest:DataTtl` `>= MaxLifetime + 00:05:00` and `<= 7.00:00:00`;
+    `Guest:ActiveCheckCacheDuration` `00:00:10`..`00:05:00`; `Guest:MaxTurns` 1..1000; `Guest:MaxSessions` 1..100;
+    `Guest:MaxTurnsPerDay <= 24 x Guest:MaxTurnsPerHour`; the other limits in ADR 0006 section 11 (`TurnsPerMinute`,
+    `CreationsPerClientPerHour`, `MaxCreationsPerHour`, `MaxTurnsPerHour`, `MaxTurnsPerDay`) are integers >= 1.
+17. None of the `Guest:Workflows` ids is registered (the check runs after registration, against `IWorkflowRegistry`,
+    like rule 7).
+
+Numbering reconciliation: the local-mode branch (ADR 0005, unmerged) adds a rule 11. This branch therefore starts
+its rules at 12 and leaves 11 unused, so neither branch renumbers when both merge. If the local-mode branch is
+abandoned, rule 11 stays an intentional gap (do not renumber 12-17; tests and docs reference them). Whichever branch
+merges second checks that its rule texts did not change meaning in the meantime.
+
 Foundry inputs (D8, decided): the user supplies the Foundry project resource id (`foundryProjectResourceId`), the
 project endpoint (`foundryProjectEndpoint` -> `Foundry:ProjectEndpoint`) and the model resource id
 (`modelResourceId`, the account hosting the embedding deployment) per environment; azure-infra references them and
@@ -137,6 +165,15 @@ access for embeddings). "Delete my data" needs no extra role: Data Contributor a
   like `Production`; echo enabled in `Production` throws; echo-only registry without `Foundry:ProjectEndpoint` starts;
   any non-echo workflow without it throws; `Chat:RetentionDays` unset starts in `Development` and throws in `Dev`,
   `Test`, `Production`; `0`, `3651` and a non-integer throw; budget `00:00:00` and `00:05:00` throw.
+- Guest rules 12-17: `Guest:Enabled = false` with invalid `Guest:*` values starts, except an out-of-range
+  `Guest:DataTtl`, which throws; an https-URL issuer, an Entra
+  issuer, `Guest:Audience` equal to `AzureAd:ClientId` / `api://<ClientId>` throw; `Ephemeral` throws in `Dev`,
+  `Test` and `Production` and starts in `Development`; a versioned or non-vault `SigningKeyUri` throws;
+  `DataTtl = MaxLifetime + 00:04:59` throws and `+ 00:05:00` starts; `MaxTurnsPerDay > 24 x MaxTurnsPerHour` throws;
+  `Guest:Workflows` with no registered id throws.
 - `ChatClientFactory` constructs `AIProjectClient` only with a `TokenCredential` (type-level: no overload with a key
   exists) and not before the first `Create`.
-- `--smoke-check` returns non-zero when Cosmos or Search reject the credential (stubbed responses).
+- `--smoke-check` returns non-zero when Cosmos or Search reject the credential (stubbed responses). With guests enabled
+  in `KeyVault` mode it also loads the signing key versions, fails when no version is eligible for signing or Key Vault
+  returns 403 (message names the "Key Vault Crypto User" role), warns when the signing version expires within 30 days,
+  and signs and verifies a fixed test payload (ADR 0006 section 11).

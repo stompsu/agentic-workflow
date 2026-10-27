@@ -370,7 +370,27 @@ Durations are `TimeSpan` strings (`hh:mm:ss`).
 | `Chat:TurnsPerMinute` | `10` | no | per `oid` per replica |
 | `Chat:RetentionDays` | dev `30`, test `30`, prod `90` (user-changeable defaults) | no | D7; 1..3650; required outside Development (ADR 0003 rule 9); data-model 1.3 |
 | `Chat:DeleteUserDataBudget` | `00:01:00` | no | D7; `00:00:05`..`00:03:00` (ADR 0003 rule 10); api-contract 2.8 |
+| `Guest:Enabled` | `false`; Bicep `guestAccessEnabled`: dev `true`, test `true`, prod `false` | no | ADR 0006 (G8). When `false`, the other `Guest:*` keys are ignored except `Guest:DataTtl` (retention of leftover guest data, data-model 1.3) |
+| `Guest:SigningMode` | `KeyVault` | no | `KeyVault` / `Ephemeral`; `Ephemeral` only in `Development` (ADR 0003 rule 14) |
+| `Guest:SigningKeyUri` | `https://<vault>.vault.azure.net/keys/guest-token-signing` | no | versionless; required when enabled in `KeyVault` mode (rule 15). Not a secret: the private key never leaves Key Vault |
+| `Guest:SigningKeyRefreshInterval` | `01:00:00` | no | `00:05:00`..`01:00:00` (ADR 0006 section 5.4) |
+| `Guest:Issuer` | `supportchat-guest-<env>` | no | required when enabled; `^[a-z0-9-]{3,64}$`; never an Entra issuer (rule 12) |
+| `Guest:Audience` | `supportchat-api-guest` | no | `^[a-z0-9-]{3,64}$`; disjoint from the Entra audiences both ways (rule 13) |
+| `Guest:MaxLifetime` | `04:00:00` | no | `00:30:00`..`12:00:00`; token `exp` = guest identity end (G5) |
+| `Guest:DataTtl` | `04:15:00` | no | `>= MaxLifetime + 00:05:00`, `<= 7.00:00:00`; `ttl` of every guest document (data-model 1.3) |
+| `Guest:ActiveCheckCacheDuration` | `00:01:00` | no | `00:00:10`..`00:05:00`; per-replica guest-document check (G17) |
+| `Guest:TurnsPerMinute` | `5` | no | per guest per replica |
+| `Guest:MaxTurns` | `30` | no | 1..1000 per guest identity (snapshot on the guest document) |
+| `Guest:MaxSessions` | `5` | no | 1..100 sessions created per guest identity (snapshot) |
+| `Guest:CreationsPerClientPerHour` | `10` | no | per client address per replica |
+| `Guest:MaxCreationsPerHour` | `200` | no | per environment (Cosmos counter, G15) |
+| `Guest:MaxTurnsPerHour` | `300` | no | per environment, all guests (Cosmos counter, G15) |
+| `Guest:MaxTurnsPerDay` | `2000` | no | per environment, all guests; `<= 24 x MaxTurnsPerHour` (G15) |
+| `Guest:TrustClientIpHeader` | `false`; Bicep sets `true` in ACA | no | read `X-Client-Ip` from nginx (ADR 0006 section 9.4) |
+| `Guest:Workflows` | `["support-ticket"]` (env `Guest__Workflows__0`) | no | at least one id must be registered (rule 17, G9) |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | from infra | treat as config | |
+
+Guest startup validation: ADR 0003 section 4 rules 12-17 (rule 11 is left to the local-mode ADR 0005).
 
 Ingestion adds `Ingestion:EmbeddingDeployment` (deployment of `text-embedding-3-small`, 1536 dims, D8),
 `Ingestion:SourcePath` (repo `knowledge/`, D9), `Ingestion:ChunkTokens` (800), `Ingestion:ChunkOverlapTokens` (80),
@@ -381,6 +401,10 @@ Frontend container env (none secret; defaults and formats in /docs/auth-setup.md
 `AUTH_AUTHORITY`, `AUTH_API_SCOPE`; optional `AUTH_PROVIDERS` (nonprod adds the email entry, D6),
 `AUTH_KNOWN_AUTHORITIES`, `AUTH_REDIRECT_URI` (default `/redirect.html`), `API_BASE_URL` (default `/api`), `APP_TITLE`,
 `APP_TAGLINE`, `APP_RETENTION_DAYS` (same value as `Chat:RetentionDays`), `APP_SUPPORT_CONTACT` (set in prod).
+Guest access (ADR 0006 section 11), optional: `AUTH_GUEST_ENABLED` (`true`/`false`, default false; same Bicep param
+as `Guest:Enabled`) -> `auth.guest.enabled`; `AUTH_GUEST_LABEL` (default "Continue as guest") -> `auth.guest.label`;
+`APP_GUEST_SESSION_HOURS` (1..12, = `Guest:MaxLifetime` in hours) -> `app.guestSessionHours`;
+`APP_GUEST_RETENTION_HOURS` (1..168, = `Guest:DataTtl` rounded up to whole hours) -> `app.guestRetentionHours`.
 
 ## 6. Decisions and open questions
 
@@ -443,3 +467,139 @@ Q4. Local Node upgraded to v26.12.1 (2026-10-25); frontend Docker build stage an
 Q2. Pipeline templates now exist in `.claude/skills/github-actions-pipelines/templates/`; devops-pipelines uses them.
 Q3. actionlint is being installed locally; devops-pipelines lints with it.
 (Q7, agent file names, fixed and removed.)
+
+## 7. Guest access (APPROVED 2026-10-27 by the user, ADR 0006 revision 2 Accepted; branch `feature/guest-access`)
+
+Design: /docs/adr/0006-guest-access.md (status Accepted, revision 2). The user resolved G1..G18 on 2026-10-27 by
+accepting every recommendation (ADR 0006 section 13). G3: the user approved the CLAUDE.md amendment text in ADR 0006
+section 3.2 and makes that edit personally; agents do not edit CLAUDE.md, and the edit must land before this branch
+merges. ADR number 0005 is reserved for the local-mode ADR on another branch. Startup rules: this branch uses ADR 0003
+rules 12-17 and leaves rule 11 to the local-mode branch (reconciliation note in ADR 0003 section 4); any other auth
+changes must still be reconciled with that branch when both merge.
+Contract-first step done 2026-10-27: api-contract 1, 2, 2.8, 2.9, 3, 5, 6, 7; data-model 1.1-1.3, 1.5, 1.7, 1.8;
+ADR 0001 revision note; ADR 0003 rules 12-17; config keys in section 5. Implementation (Phase G1) codes against these.
+
+### 7.1 Summary
+- Third login option "Continue as guest". Entra External ID has no anonymous sign-in method (Learn, checked
+  2026-10-27), so the API issues the guest identity itself: ONE ES256 JWT per guest, `exp` = guest max lifetime
+  (4 h), no refresh, signed with a Key Vault key through the managed identity (local `Development`: in-process
+  ephemeral key; tests: explicit fake signer). Validated by a second JWT bearer scheme that stamps
+  `AuthenticationType = "guest"`; `oid` = `guest-<guid>` is the Cosmos partition key, so the isolation model is
+  unchanged. Revocation = the guest document (authoritative in write transactions, 60 s cache for reads).
+- "Same browser session" = guest token in `sessionStorage`, handed over to new tabs through `BroadcastChannel` while
+  another tab is open (no blocking wait). Guest data TTL 4 h 15 min after each write.
+- Cost: per-client creation limit (`X-Client-Ip` from nginx, parsed by the backend; unparsable -> no per-client
+  bucket), global creation cap, global guest-turn caps per hour AND per day, per-guest turn (30) and session (5) quotas
+  via Cosmos conditional patch inside the existing transactions, per-minute limit, per-environment switch (prod off;
+  CAPTCHA and the prod Key Vault role are preconditions for prod).
+- Contract: one new endpoint (`POST /api/guest/token`), four new error codes (`guest_access_disabled`,
+  `guest_expired`, `guest_quota_exceeded`, `bot_check_failed`), amendments to api-contract 2.8 (auth bullet, 204 for an
+  ended guest), 3 (401/403 text) and 5 (`forbidden`, `rate_limited`, `unsupported_media_type` rows). SSE is
+  unchanged. No `isGuest` in responses. Applied to api-contract.md on 2026-10-27 (new section 2.9).
+
+### 7.2 Interfaces between components (additions)
+
+| From -> To | Interface | Defined in |
+|---|---|---|
+| SPA -> API | `POST /api/guest/token` (`{accessToken, tokenType, expiresAt}`), new error codes, amended 401/403/429 semantics | api-contract 1, 2.9, 3, 5 (applied 2026-10-27; ADR 0006 section 7 is the record) |
+| SPA tab <-> SPA tab | `BroadcastChannel("supportchat-guest")`: `guest-token-request`, `guest-token` (reply, only tokens with > 60 s left), `guest-ended` | ADR 0006 section 4 |
+| nginx -> API | header `X-Client-Ip` (rightmost `X-Forwarded-For` entry, overwrites client value; set only in `location /api/`; `map` in `conf.d`) | api-contract 7, ADR 0006 section 9.4 |
+| API auth -> API | `CurrentUser.TryGetUser(principal, out userId, out UserKind)` (discriminator = `AuthenticationType "guest"` + validated `iss`); `ChatUserRequirement` in both the `ChatUser` and fallback policies; `ICurrentUser.IsGuest` (additive) | ADR 0006 section 5.3 |
+| API -> Key Vault | `IGuestTokenSigner` (`SignAsync`, sync `ResolveValidationKey`), `GuestSigningKeyCache` + `GuestSigningKeyRefresher` hosted service | ADR 0006 sections 5.4-5.5 |
+| API -> Cosmos | `IGuestStore` (Core: `CreateAsync`, `GetAsync`, `IncrementCounterAsync`); `ISessionStore.CreateAsync` / `TryStartTurnAsync` gain `enforceGuestQuota` and guest result variants; `RetentionPolicy.TtlSeconds(userId)`; guest document; counter partition `system-guest-counter` | ADR 0006 section 6; data-model 1.3, 1.5, 1.7, 1.8 |
+| infra -> backend / frontend | `Guest__*` env vars; `AUTH_GUEST_ENABLED`, `APP_GUEST_SESSION_HOURS`, `APP_GUEST_RETENTION_HOURS` | section 5; ADR 0006 sections 11-12 |
+
+### 7.3 Tasks (Phase G1, approved 2026-10-27; order: architect -> backend-dotnet + frontend-react in parallel -> azure-infra -> qa-reviewer)
+- architect (DONE 2026-10-27): apply ADR 0006 section 7 to api-contract.md (new 2.9, amendments to 1,
+  2.8, 3, 5, 6, 7); add the guest document, counter partition and retention-by-user rule to data-model.md; revision
+  note in ADR 0001; new startup rules in ADR 0003 section 4 (rules 12-17); config keys to section 5 of this file; set
+  ADR 0006 to Accepted.
+- backend-dotnet:
+  - Auth: `ApiBearer` policy scheme (routes by unvalidated `iss` peek; routing only) + `Guest` JwtBearer scheme
+    (registered only when `Guest:Enabled`; `AuthenticationType = "guest"`; ES256 only; resolver from the key cache;
+    `SecurityTokenExpiredException` -> 401 `guest_expired`); `CurrentUser.TryGetUser` + `UserKind` (keep
+    `TryGetUserId` as wrapper); `ChatUserRequirement` + handler replacing `RequireScope` + `RequireAssertion` in BOTH the
+    `ChatUser` and fallback policies (`AuthExtensions`); `ChatRateLimiting` uses `TryGetUser` and the guest limit;
+    `ICurrentUser.IsGuest`.
+  - Signing: `IGuestTokenSigner` (`KeyVaultGuestTokenSigner` with `KeyClient`/`CryptographyClient` from
+    `Azure.Security.KeyVault.Keys` (add a central pin; latest stable 4.10.2, verify at implementation),
+    `SignDataAsync(ES256)` on the versioned key id; `EphemeralGuestTokenSigner` for Development only);
+    `IGuestTokenService` (JWS compact assembly, ADR 0006 section 5.2); `GuestSigningKeyCache` +
+    `GuestSigningKeyRefresher` (prefill, last-good on failure, coalesced refetch on unknown `kid` at most every 30 s,
+    signing version older than one refresh interval, expiry handling and log events, ADR 0006 section 5.4).
+  - Endpoint `POST /api/guest/token` (AllowAnonymous; guard order ADR 0006 section 8). No refresh endpoint.
+  - Stores: `IGuestStore` in Core with Cosmos and InMemory implementations; guest document create before signing;
+    `ISessionStore.CreateAsync` -> `CreateSessionResult` and `TryStartTurnAsync` with `enforceGuestQuota` (guest-doc
+    `PatchItem` + `FilterPredicate` + `Increment` inside the existing transactional batch; 404 -> `GuestExpired`, 412 ->
+    `GuestQuotaExceeded`; V3 first, blocking); `GuestActivityCache` (60 s positive, negative until `exp`, "quota
+    exhausted" flag) applied to every guest request except `DELETE /api/me/data`; `DeleteAllUserDataAsync` deletes the
+    guest document last (ended guest -> 204); global counters with patch `Increment` (create on 404) and in-memory
+    "closed until" flags.
+  - Retention refactor: replace `TurnRules.TtlSeconds(int?)` with `RetentionPolicy.TtlSeconds(userId)` at
+    `CosmosSessionStore` lines 37, 98, 196, 279, 282, 323, 329 and `InMemoryChatStore` line 351; guests always get
+    `Guest:DataTtl`, even when `Chat:RetentionDays` is unset; `TurnRulesTests` -> `RetentionPolicyTests`.
+  - Limits: guest per-minute limit; per-client creation limiter keyed by the parsed `X-Client-Ip` (port/bracket
+    stripping, IPv4-mapped -> IPv4, IPv6 /64; unparsable -> no per-client bucket + metric) only when
+    `Guest:TrustClientIpHeader`; global creation and guest-turn (hour + day) caps; `Retry-After` per ADR 0006 9.2.
+  - Workflow filtering for guests (`Guest:Workflows`) in `GET /api/workflows`, `POST /api/sessions` (400) and POST
+    messages (409 `workflow_unavailable`).
+  - Options + startup validation (ADR 0006 section 11: issuer pattern and not an Entra issuer, audiences differ both
+    ways, versionless `SigningKeyUri`, Ephemeral only in Development, ranges, `DataTtl >= MaxLifetime + 5 min`);
+    `--smoke-check` sign/verify, eligible-version check and a clear message on a Key Vault 403 (missing role).
+  - Tests: the auth tests in ADR 0006 section 5.3 (GUID `oid` on a guest principal -> 403; `guest-` `oid` on an Entra
+    principal -> 403; guest `AuthenticationType` with a foreign `iss` -> 403; cross-scheme forgeries, `alg: none`,
+    wrong `aud`, expired guest -> `guest_expired`); test host registers a fake `IGuestTokenSigner` explicitly; key
+    cache (prefill, last-good on failure, unknown-`kid` throttle, signing-version selection, near-expiry and
+    no-eligible-version behavior) with `FakeTimeProvider`; issuance claims/alg/kid/`exp`; isolation guest A vs guest B vs
+    social user (in-memory + emulator); turn and session quotas -> 429 `guest_quota_exceeded` with nothing persisted
+    and no quota consumed on 409/404; accepted turn consumes quota even when it fails or is cancelled; after
+    `DELETE /api/me/data`: writes -> 401 `guest_expired` immediately, reads after the cache window, repeated DELETE ->
+    204; guest TTL values with and without `Chat:RetentionDays`; global caps (closed-flag caching, no Cosmos write
+    while closed, `Retry-After` at hour/day boundaries) with `FakeTimeProvider`; check order (in-memory before
+    Cosmos); client-IP parsing matrix incl. spoofed `X-Forwarded-For`; workflow filtering; log capture proves no token
+    or IP is logged; validation matrix; V1 round-trip test against the dev vault (manual/opt-in).
+- agent-workflows: no functional change for G16 (a). Confirm no workflow parses `WorkflowRunRequest.UserId` as a GUID or
+  logs it beyond `enduser.id` (guest ids are `guest-<guid>`). Only if G16 (b) is chosen: support a second,
+  config-parameterized registration of the SupportTicket definition (`support-ticket-guest`) with its own deployments.
+- frontend-react:
+  - Auth: guest mode alongside MSAL (`AuthContextValue` gains `mode: 'social' | 'guest'` and `loginAsGuest()`); guest
+    token + `expiresAt` in `sessionStorage` (`supportchat.guest`); no refresh; timer at `expiresAt` ends guest mode;
+    start-up order per ADR 0006 section 4 (an MSAL account wins and the stale guest token is removed; no blocking
+    BroadcastChannel wait, background hand-off within 300 ms, only tokens with > 60 s left are handed over); logout in
+    either mode clears guest storage and broadcasts `guest-ended`.
+  - `api/client.ts`: on a 401, read the ProblemDetails `code` before cancelling the body; `guest_expired` -> no
+    `forceRefresh`, no retry, call a new `onGuestEnded` (clear token, broadcast, login page notice) and throw
+    `ApiError(401, 'guest_expired')`; 401 `unauthorized` in guest mode -> one retry after 1 s with the same token, then
+    end guest mode; social mode unchanged (forceRefresh once, then `onAuthFailure`). Same handling on the SSE fetch.
+  - UI: third login button + caption (only when `auth.guest.enabled`); "Guest" badge; account menu "Sign in" (warning
+    dialog) and "End guest session" (confirm -> abort stream -> `DELETE /api/me/data` -> clear -> broadcast); guest
+    retention note; `guest_quota_exceeded` disables the composer (POST messages) or "New chat" (POST sessions) with a
+    sign-in prompt; 429 on guest creation honors `Retry-After`.
+  - Config: `auth.guest.enabled`, `auth.guest.label`, `app.guestSessionHours`, `app.guestRetentionHours`; entrypoint env
+    `AUTH_GUEST_ENABLED`, `AUTH_GUEST_LABEL`, `APP_GUEST_SESSION_HOURS`, `APP_GUEST_RETENTION_HOURS` (validated like
+    the existing values).
+  - nginx: `map` for `$client_ip` in a `conf.d` file (http context) + `proxy_set_header X-Client-Ip $client_ip` only in
+    `location /api/` (ADR 0006 section 9.4); if G12 is accepted, a `log_format` without client IPs. V2 check in dev with
+    azure-infra (blocking for relying on the per-client limit).
+  - Tests (Vitest + Playwright): button visibility by config; guest login stores the token and sends it as Bearer;
+    `expiresAt` timer (fake timers); 401 `guest_expired` -> no retry -> login notice; 401 `unauthorized` in guest mode
+    -> one delayed retry -> end; MSAL account + stale guest token -> social mode and token removed; logout clears and
+    broadcasts; tab hand-off (only > 60 s tokens) and `guest-ended` (BroadcastChannel mock); end-guest flow incl.
+    DELETE failure; both quota messages; config parsing; Playwright guest happy path with a mocked backend.
+- azure-infra: Key Vault key `guest-token-signing` (EC P-256, sign/verify, no `exp` on the initial version, rotation
+  policy: rotate 90 days, notify 30 days before expiry, `expiryTime` P1Y) when `guestAccessEnabled`; new
+  `keyvault.bicep` parameter for "Key Vault Crypto User" on the app UAMI, independent of the secrets role (all envs
+  with guests; prod has no Key Vault role today, so enabling prod adds one); Azure Monitor scheduled-query alert on
+  `GuestSigningKeyNearExpiry` / `GuestSigningKeyUnavailable` + action group to `alertEmail` (deploy-time param);
+  params `guestAccessEnabled` (dev true, test true, prod false), `guestMaxLifetimeHours` (4), `guestDataTtlMinutes`
+  (255), optional caps (`guestMaxCreationsPerHour`, `guestMaxTurns`, `guestMaxSessions`, `guestMaxTurnsPerHour`,
+  `guestMaxTurnsPerDay`); backend `Guest__*` env (incl. `Guest__TrustClientIpHeader=true`,
+  `Guest__Issuer=supportchat-guest-<env>`), smoke job env, frontend `AUTH_GUEST_ENABLED` / `APP_GUEST_SESSION_HOURS` /
+  `APP_GUEST_RETENTION_HOURS` derived from the same params; `infra/README.md` notes; what-if review by the user.
+- devops-pipelines: none expected (no workflow change; images unchanged; infra deployed by the user, D11).
+- qa-reviewer: contract compliance of the new endpoint/codes and the amended 2.8/3/5 text; scheme discriminator and
+  namespace tests (both directions) on both policies; key-cache behavior across replicas; check order and no Cosmos
+  writes while a cap is closed; quota atomicity (V3 evidence); no token/IP in logs; prod params keep guests off;
+  startup validation (Ephemeral never outside Development, issuer/audience separation, versionless key URI); nginx header
+  overwrite only in `/api/`; Key Vault role least privilege; CLAUDE.md amended by the user before merge; prod
+  preconditions (G7 CAPTCHA, prod crypto role) documented before any prod enablement.

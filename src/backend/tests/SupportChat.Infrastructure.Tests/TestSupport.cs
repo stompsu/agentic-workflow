@@ -58,3 +58,16 @@ internal sealed class StubCredentialProvider(TokenCredential credential) : IAzur
 {
     public TokenCredential Credential => credential;
 }
+
+/// <summary>Pre-guest call shapes (no quota enforcement), so the shared store contract stays readable.</summary>
+internal static class SessionStoreTestExtensions
+{
+    public static async Task<SupportChat.Core.Storage.SessionRecord> CreateAsync(
+        this SupportChat.Core.Storage.ISessionStore store, string userId, string workflowId, string? title, CancellationToken ct) =>
+        Assert.IsType<SupportChat.Core.Storage.CreateSessionResult.Created>(
+            await store.CreateAsync(userId, workflowId, title, false, ct)).Session;
+
+    public static Task<SupportChat.Core.Storage.StartTurnResult> TryStartTurnAsync(
+        this SupportChat.Core.Storage.ISessionStore store, string userId, string sessionId, SupportChat.Core.Storage.MessageRecord message, CancellationToken ct) =>
+        store.TryStartTurnAsync(userId, sessionId, message, false, ct);
+}

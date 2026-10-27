@@ -37,3 +37,17 @@ param supportContact = ''
 // cheaper model than the specialists.
 param orchestratorDeployment = 'REPLACE_ME'
 param specialistDeployment = 'REPLACE_ME'
+
+// Guest access (ADR 0006): on in nonprod. Creates Key Vault key guest-token-signing and Key Vault Crypto User for the app identity.
+param guestAccessEnabled = true
+param guestMaxLifetimeHours = 4
+param guestDataTtlMinutes = 255 // 4 h 15 min; >= lifetime + 5 min
+// Optional caps (omit = backend defaults 200 / 30 / 5 / 300 / 2000):
+// param guestMaxCreationsPerHour = 200
+// param guestMaxTurns = 30
+// param guestMaxSessions = 5
+// param guestMaxTurnsPerHour = 300
+// param guestMaxTurnsPerDay = 2000
+// Operator email for the guest signing key alert (user input, not a secret, do not commit a real address): REPLACE_ME is a
+// placeholder caught by check-params.sh: set it locally for the deploy and do not commit a real address.
+param alertEmail = 'REPLACE_ME'

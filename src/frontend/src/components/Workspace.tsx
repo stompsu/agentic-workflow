@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
-import { DEFAULT_BRANDING, type AppInfoConfig } from '../config/config';
+import { DEFAULT_BRANDING, DEFAULT_GUEST_RETENTION_HOURS, type AppInfoConfig, type ProviderConfig } from '../config/config';
 import { useAuth } from '../auth/AuthContext';
 import { ChatView } from './ChatView';
+import { GuestLimitsContext } from '../chat/guestLimits';
 import { DeleteDataDialog } from './DeleteDataDialog';
+import { EndGuestDialog, type EndGuestVariant } from './EndGuestDialog';
 import { Sidebar } from './Sidebar';
 
 interface Selection {
@@ -12,8 +14,30 @@ interface Selection {
   nonce: number;
 }
 
-export function Workspace({ title = DEFAULT_BRANDING.title, info = {} }: { title?: string; info?: AppInfoConfig }) {
-  const { userName, logout } = useAuth();
+const GUEST_BADGE_HINT = 'Guest chats are not saved to an account. Close the browser and they are gone.';
+
+export function Workspace({
+  title = DEFAULT_BRANDING.title,
+  info = {},
+  providers = [],
+}: {
+  title?: string;
+  info?: AppInfoConfig;
+  /** Offered when a guest chooses "Sign in". */
+  providers?: ProviderConfig[];
+}) {
+  const { userName, logout, mode, endGuest, login } = useAuth();
+  const isGuest = mode === 'guest';
+  const [guestDialog, setGuestDialog] = useState<EndGuestVariant | null>(null);
+  const [exhausted, setExhausted] = useState({ sessions: false, turns: false });
+  const guestLimits = useMemo(
+    () => ({
+      sessionsExhausted: exhausted.sessions,
+      turnsExhausted: exhausted.turns,
+      report: (kind: 'sessions' | 'turns') => setExhausted((e) => (e[kind] ? e : { ...e, [kind]: true })),
+    }),
+    [exhausted],
+  );
   const [selection, setSelection] = useState<Selection>({ sessionId: null, nonce: 0 });
   const [menuOpen, setMenuOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -29,12 +53,16 @@ export function Workspace({ title = DEFAULT_BRANDING.title, info = {} }: { title
 
   function closeDialog() {
     // Commit first: the app root is inert while the dialog is open and inert elements cannot take focus.
-    flushSync(() => setConfirmingDelete(false));
+    flushSync(() => {
+      setConfirmingDelete(false);
+      setGuestDialog(null);
+    });
     accountButton.current?.focus();
   }
 
   return (
-    <div className="app" inert={confirmingDelete}>
+    <GuestLimitsContext.Provider value={guestLimits}>
+    <div className="app" inert={confirmingDelete || guestDialog !== null}>
       <a className="skip-link" href="#main">
         Skip to conversation
       </a>
@@ -44,7 +72,18 @@ export function Workspace({ title = DEFAULT_BRANDING.title, info = {} }: { title
         </button>
         <h1 className="brand">{title}</h1>
         <span className="spacer" />
-        {userName && <span className="user-name">{userName}</span>}
+        {isGuest ? (
+          <span className="guest-badge" title={GUEST_BADGE_HINT} aria-describedby="guest-badge-hint">
+            Guest
+          </span>
+        ) : (
+          userName && <span className="user-name">{userName}</span>
+        )}
+        {isGuest && (
+          <span id="guest-badge-hint" className="sr-only">
+            {GUEST_BADGE_HINT}
+          </span>
+        )}
         <div
           className="account"
           onKeyDown={(e) => {
@@ -59,22 +98,49 @@ export function Workspace({ title = DEFAULT_BRANDING.title, info = {} }: { title
           </button>
           {accountOpen && (
             <div id="account-menu" className="account-menu">
-              <button
-                type="button"
-                className="btn btn-small btn-secondary"
-                onClick={() => {
-                  setAccountOpen(false);
-                  setConfirmingDelete(true);
-                }}
-              >
-                Delete my data
-              </button>
+              {isGuest ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-small btn-secondary"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      setGuestDialog('signin');
+                    }}
+                  >
+                    Sign in
+                  </button>{' '}
+                  <button
+                    type="button"
+                    className="btn btn-small btn-secondary"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      setGuestDialog('end');
+                    }}
+                  >
+                    End guest session
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-small btn-secondary"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    setConfirmingDelete(true);
+                  }}
+                >
+                  Delete my data
+                </button>
+              )}
             </div>
           )}
         </div>
-        <button type="button" className="btn btn-small btn-secondary" onClick={() => void logout()}>
-          Sign out
-        </button>
+        {!isGuest && (
+          <button type="button" className="btn btn-small btn-secondary" onClick={() => void logout()}>
+            Sign out
+          </button>
+        )}
       </header>
       <div className="layout">
         <div id="history" className={menuOpen ? 'history history-open' : 'history'}>
@@ -83,6 +149,7 @@ export function Workspace({ title = DEFAULT_BRANDING.title, info = {} }: { title
             onSelect={(id) => select(id)}
             onNewChat={() => select(null)}
             {...(info.retentionDays !== undefined && { retentionDays: info.retentionDays })}
+            {...(isGuest && { guestRetentionHours: info.guestRetentionHours ?? DEFAULT_GUEST_RETENTION_HOURS })}
             onDeleted={(id) => {
               if (id === selection.sessionId) select(null);
             }}
@@ -112,6 +179,25 @@ export function Workspace({ title = DEFAULT_BRANDING.title, info = {} }: { title
         </main>
       </div>
       {/* Portal to body: the dialog must sit outside the inert app root. */}
+      {guestDialog !== null &&
+        createPortal(
+          <EndGuestDialog
+            variant={guestDialog}
+            providers={providers}
+            onBeforeDelete={() => flushSync(() => setSelection((s) => ({ sessionId: null, nonce: s.nonce + 1 })))}
+            onFinished={(outcome, choice) => {
+              const variant = guestDialog;
+              if (variant === 'signin') {
+                endGuest('silent');
+                void login(choice?.domainHint);
+              } else {
+                endGuest(outcome);
+              }
+            }}
+            onClose={closeDialog}
+          />,
+          document.body,
+        )}
       {confirmingDelete &&
         createPortal(
           <DeleteDataDialog
@@ -131,5 +217,6 @@ export function Workspace({ title = DEFAULT_BRANDING.title, info = {} }: { title
           document.body,
         )}
     </div>
+    </GuestLimitsContext.Provider>
   );
 }

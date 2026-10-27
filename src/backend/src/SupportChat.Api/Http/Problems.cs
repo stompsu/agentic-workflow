@@ -24,6 +24,10 @@ public static class Problems
         public const string RateLimited = "rate_limited";
         public const string InternalError = "internal_error";
         public const string DeletionIncomplete = "deletion_incomplete";
+        public const string GuestAccessDisabled = "guest_access_disabled";
+        public const string GuestExpired = "guest_expired";
+        public const string GuestQuotaExceeded = "guest_quota_exceeded";
+        public const string BotCheckFailed = "bot_check_failed";
     }
 
     public static IResult Create(int status, string code, IReadOnlyDictionary<string, string[]>? errors = null) =>
@@ -34,6 +38,18 @@ public static class Problems
     /// <summary>503 deletion_incomplete with Retry-After: 1 (api-contract 2.8).</summary>
     public static IResult DeletionIncomplete() => new RetryAfterResult(
         Create(StatusCodes.Status503ServiceUnavailable, Codes.DeletionIncomplete), "1");
+
+    /// <summary>401 guest_expired: the guest identity has ended (token expired or data deleted). The client must not retry.</summary>
+    public static IResult GuestExpired() => Create(StatusCodes.Status401Unauthorized, Codes.GuestExpired);
+
+    /// <summary>429 guest_quota_exceeded WITHOUT Retry-After (api-contract 2.9).</summary>
+    public static IResult GuestQuotaExceeded() => Create(StatusCodes.Status429TooManyRequests, Codes.GuestQuotaExceeded);
+
+    /// <summary>429 rate_limited with Retry-After in whole seconds (minimum 1).</summary>
+    public static IResult RateLimited(TimeSpan retryAfter) =>
+        new RetryAfterResult(
+            Create(StatusCodes.Status429TooManyRequests, Codes.RateLimited),
+            Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds)).ToString(System.Globalization.CultureInfo.InvariantCulture));
 
     public static IResult TurnInProgress() => Create(StatusCodes.Status409Conflict, Codes.TurnInProgress);
 

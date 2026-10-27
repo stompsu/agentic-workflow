@@ -68,4 +68,29 @@ describe('config', () => {
       expect(() => parseConfig({ ...valid, app })).toThrow(ConfigError);
     },
   );
+
+  it('guest access: disabled by default, label default, hours optional', () => {
+    const c = parseConfig(valid);
+    expect(c.auth.guest).toEqual({ enabled: false, label: 'Continue as guest' });
+    expect(c.info.guestSessionHours).toBeUndefined();
+    const g = parseConfig({
+      ...valid,
+      auth: { ...valid.auth, guest: { enabled: true, label: ' Try it ' } },
+      app: { guestSessionHours: 4, guestRetentionHours: 5 },
+    });
+    expect(g.auth.guest).toEqual({ enabled: true, label: 'Try it' });
+    expect(g.info).toEqual({ guestSessionHours: 4, guestRetentionHours: 5 });
+  });
+
+  it.each([
+    { auth: { guest: { enabled: 'true' } } },
+    { auth: { guest: 'yes' } },
+    { app: { guestSessionHours: 0 } },
+    { app: { guestSessionHours: 13 } },
+    { app: { guestRetentionHours: 169 } },
+    { app: { guestRetentionHours: '5' } },
+    { app: { guestRetentionHours: 1.5 } },
+  ])('rejects invalid guest config %#', (over) => {
+    expect(() => parseConfig({ ...valid, ...('app' in over ? { app: over.app } : {}), auth: { ...valid.auth, ...('auth' in over ? over.auth : {}) } })).toThrow(ConfigError);
+  });
 });

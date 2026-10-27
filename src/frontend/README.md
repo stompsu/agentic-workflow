@@ -29,6 +29,10 @@ Container: written at start by `docker-entrypoint.d/10-write-config.sh` from env
 | `APP_TAGLINE` | no | `app.tagline`: line under the title on the login page; default `Sign in to continue.` |
 | `APP_RETENTION_DAYS` | no | integer 1..3650, same value as backend `Chat:RetentionDays`; `app.retentionDays` (sidebar note "Chats are kept for N days after last activity") and the retention text on `/data-deletion.html`. Invalid value: container fails to start |
 | `APP_SUPPORT_CONTACT` | no (prod: yes) | plain text, max 200 chars, no control characters (e.g. an email address); `app.supportContact` (shown in the "Delete my data" result notice) and `/data-deletion.html`. Always rendered as text, HTML-escaped |
+| `AUTH_GUEST_ENABLED` | no | `true` or `false` (default `false`); shows "Continue as guest" on the login page (`auth.guest.enabled`). Must match backend `Guest__Enabled`. Anything else: container fails to start |
+| `AUTH_GUEST_LABEL` | no | button label, 1..60 chars plain text (default "Continue as guest"); `auth.guest.label` |
+| `APP_GUEST_SESSION_HOURS` | no | integer 1..12, same as backend `Guest:MaxLifetime` in hours (login caption, default 4); `app.guestSessionHours` |
+| `APP_GUEST_RETENTION_HOURS` | no | integer 1..168, `Guest:DataTtl` rounded up to hours (caption and sidebar note, default 5); `app.guestRetentionHours` |
 | `API_BASE_URL` | no | default `/api` |
 
 None are secrets.
