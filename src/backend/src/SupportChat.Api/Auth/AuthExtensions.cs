@@ -11,14 +11,26 @@ public static class AuthExtensions
     public const string ChatUserPolicy = "ChatUser";
 
     /// <summary>
-    /// JWT bearer validation against the Entra External ID tenant (ADR 0001). Policy ChatUser: authenticated user,
-    /// required scope, and a valid oid claim. 401/403 bodies are ProblemDetails with stable codes.
+    /// JWT bearer validation against the Entra External ID tenant (ADR 0001) plus the ChatUser policy: authenticated
+    /// user, required scope, and a valid oid claim. 401/403 bodies are ProblemDetails with stable codes.
     /// </summary>
     public static IServiceCollection AddChatAuth(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddEntraJwtBearer(configuration);
+        return services.AddChatAuthorization(configuration);
+    }
+
+    /// <summary>The "Bearer" scheme validated through Microsoft.Identity.Web against the AzureAd section.</summary>
+    public static MicrosoftIdentityWebApiAuthenticationBuilderWithConfiguration AddEntraJwtBearer(this IServiceCollection services, IConfiguration configuration) =>
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddMicrosoftIdentityWebApi(configuration.GetSection("AzureAd"));
 
+    /// <summary>
+    /// ProblemDetails challenge/forbidden handling for the "Bearer" scheme, the ChatUser and fallback policies, the
+    /// ProblemDetails authorization result handler and ICurrentUser (oid). Independent of how the token is validated.
+    /// </summary>
+    public static IServiceCollection AddChatAuthorization(this IServiceCollection services, IConfiguration configuration)
+    {
         services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
         {
             var previous = options.Events.OnChallenge;
