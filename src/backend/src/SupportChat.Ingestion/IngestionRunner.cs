@@ -2,6 +2,7 @@ using Azure.Search.Documents;
 using Azure.Search.Documents.Models;
 using Microsoft.Extensions.AI;
 using SupportChat.Infrastructure.Search;
+using SupportChat.Infrastructure.Search.Source;
 
 namespace SupportChat.Ingestion;
 

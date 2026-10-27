@@ -1,3 +1,4 @@
+using SupportChat.Infrastructure.Search.Source;
 using SupportChat.Ingestion;
 
 namespace SupportChat.Ingestion.Tests;

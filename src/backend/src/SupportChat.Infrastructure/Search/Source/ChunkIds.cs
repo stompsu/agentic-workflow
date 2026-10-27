@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace SupportChat.Ingestion;
+namespace SupportChat.Infrastructure.Search.Source;
 
 public static class ChunkIds
 {

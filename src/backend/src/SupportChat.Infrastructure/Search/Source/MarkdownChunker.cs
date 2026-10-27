@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace SupportChat.Ingestion;
+namespace SupportChat.Infrastructure.Search.Source;
 
 public sealed record Chunk(int Index, string Title, string Content);
 

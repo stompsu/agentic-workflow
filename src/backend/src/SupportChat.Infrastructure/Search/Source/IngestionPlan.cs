@@ -1,4 +1,4 @@
-namespace SupportChat.Ingestion;
+namespace SupportChat.Infrastructure.Search.Source;
 
 public sealed record PlannedChunk(string Id, string Domain, string Title, string Content, string? SourceUrl, string SourcePath);
 

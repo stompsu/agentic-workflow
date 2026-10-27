@@ -1,6 +1,5 @@
-using SupportChat.Infrastructure.Search;
 
-namespace SupportChat.Ingestion;
+namespace SupportChat.Infrastructure.Search.Source;
 
 public sealed record SourceDocument(string SourcePath, string Domain, string Title, string? SourceUrl, string Markdown);
 
