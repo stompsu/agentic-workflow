@@ -1,4 +1,4 @@
-# SupportChat backend
+# Agentic Workflow backend
 
 .NET 10 minimal API. Contract: `/docs/api-contract.md`; decisions: `/docs/adr/`. Everything is stateless
 (sessions live in Cosmos DB); user identity is the `oid` claim of the validated token.
@@ -6,11 +6,11 @@
 ```
 dotnet build src/backend
 dotnet test src/backend
-dotnet run --project src/backend/src/SupportChat.Api      # ASPNETCORE_ENVIRONMENT=Development, http://localhost:5080
-docker build -t support-backend src/backend               # image support-backend, non-root, port 8080
+dotnet run --project src/backend/src/AgenticWorkflow.Api      # ASPNETCORE_ENVIRONMENT=Development, http://localhost:5080
+docker build -t agentic-workflow-backend src/backend               # image agentic-workflow-backend, non-root, port 8080
 ```
 
-Layout: `src/SupportChat.Core` (contracts), `.Infrastructure` (Cosmos stores, Azure clients, `ChatClientFactory`),
+Layout: `src/AgenticWorkflow.Core` (contracts), `.Infrastructure` (Cosmos stores, Azure clients, `ChatClientFactory`),
 `.Agents` (workflow registry), `.Api` (endpoints, auth). Tests in `tests/`.
 
 ## Local configuration (Development: `Azure:AuthMode=Key`)
@@ -18,7 +18,7 @@ Layout: `src/SupportChat.Core` (contracts), `.Infrastructure` (Cosmos stores, Az
 Secrets are never committed. Set them with user-secrets (the Api project has a `UserSecretsId`):
 
 ```
-cd src/backend/src/SupportChat.Api
+cd src/backend/src/AgenticWorkflow.Api
 dotnet user-secrets set "Cosmos:Endpoint"   "https://<account>.documents.azure.com:443/"
 dotnet user-secrets set "Cosmos:Key"        "<primary key>"
 dotnet user-secrets set "Search:Endpoint"   "https://<service>.search.windows.net"
@@ -48,7 +48,7 @@ Retention and "delete my data" (D7, ADR 0004):
   `dotnet user-secrets set "Chat:RetentionDays" "30"`.
 - `Chat:DeleteUserDataBudget` (`00:00:05`..`00:03:00`, default `00:01:00`, rule 10): time budget of
   `DELETE /api/me/data`; when it runs out the endpoint answers `503 deletion_incomplete` + `Retry-After: 1` and the
-  client repeats the call (progress is kept; api-contract 2.8, data-model 1.7). Ingestion keys: see `src/SupportChat.Ingestion`.
+  client repeats the call (progress is kept; api-contract 2.8, data-model 1.7). Ingestion keys: see `src/AgenticWorkflow.Ingestion`.
 
 Foundry is always accessed with a `TokenCredential` (`az login` locally); there is no model key.
 Deployed environments (`Dev`, `Test`, `Production`) set the same keys as environment variables with `__`

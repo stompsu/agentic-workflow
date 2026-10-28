@@ -241,7 +241,7 @@ describe('GuestLayer tab hand-off (BroadcastChannel)', () => {
   it('a reply after the 300 ms window is ignored', () => {
     const b = mount(social());
     act(() => void vi.advanceTimersByTime(301));
-    const other = new MockChannel('supportchat-guest');
+    const other = new MockChannel('agentwf-guest');
     act(() => other.postMessage({ type: 'guest-token', accessToken: 'late', expiresAt: iso(4 * HOUR) }));
     expect(b.auth().status).toBe('anonymous');
     expect(sessionStorage.getItem(GUEST_STORAGE_KEY)).toBeNull();
@@ -258,14 +258,14 @@ describe('GuestLayer tab hand-off (BroadcastChannel)', () => {
 
   it('a received token with 60 s or less left is not accepted', () => {
     const b = mount(social());
-    const other = new MockChannel('supportchat-guest');
+    const other = new MockChannel('agentwf-guest');
     act(() => other.postMessage({ type: 'guest-token', accessToken: 'dying', expiresAt: iso(60_000) }));
     expect(b.auth().status).toBe('anonymous');
   });
 
   it('a tab in social mode never accepts a guest token', () => {
     const b = mount(social({ status: 'authenticated' }));
-    const other = new MockChannel('supportchat-guest');
+    const other = new MockChannel('agentwf-guest');
     act(() => other.postMessage({ type: 'guest-token', accessToken: 'x', expiresAt: iso(4 * HOUR) }));
     expect(b.auth().mode).toBe('social');
     expect(sessionStorage.getItem(GUEST_STORAGE_KEY)).toBeNull();
@@ -274,7 +274,7 @@ describe('GuestLayer tab hand-off (BroadcastChannel)', () => {
   it('guest-ended from another tab clears storage and sends a guest-mode tab to the login page with a notice', () => {
     store('g-token', 2 * HOUR);
     const h = mount(social());
-    const other = new MockChannel('supportchat-guest');
+    const other = new MockChannel('agentwf-guest');
     act(() => other.postMessage({ type: 'guest-ended' }));
     expect(h.auth()).toMatchObject({ status: 'anonymous', guestNotice: 'expired' });
     expect(sessionStorage.getItem(GUEST_STORAGE_KEY)).toBeNull();
@@ -283,7 +283,7 @@ describe('GuestLayer tab hand-off (BroadcastChannel)', () => {
   it('guest-ended in a tab that was not a guest only clears storage (no notice)', () => {
     const h = mount(social());
     sessionStorage.setItem(GUEST_STORAGE_KEY, 'x');
-    const other = new MockChannel('supportchat-guest');
+    const other = new MockChannel('agentwf-guest');
     act(() => other.postMessage({ type: 'guest-ended' }));
     expect(h.auth().guestNotice).toBeNull();
     expect(sessionStorage.getItem(GUEST_STORAGE_KEY)).toBeNull();
@@ -291,7 +291,7 @@ describe('GuestLayer tab hand-off (BroadcastChannel)', () => {
 
   it('ignores malformed messages', () => {
     const h = mount(social());
-    const other = new MockChannel('supportchat-guest');
+    const other = new MockChannel('agentwf-guest');
     act(() => {
       other.postMessage(null);
       other.postMessage({ type: 'guest-token', accessToken: 5 });

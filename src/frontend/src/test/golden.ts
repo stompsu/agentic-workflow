@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 // The backend's golden SSE files are the byte-level reference for the wire format (read-only).
 // Tests run with cwd = src/frontend.
-const DIR = resolve(process.cwd(), '../backend/tests/SupportChat.Api.Tests/Golden');
+const DIR = resolve(process.cwd(), '../backend/tests/AgenticWorkflow.Api.Tests/Golden');
 
 export function golden(name: 'answer' | 'clarification' | 'error-midstream'): string {
   return readFileSync(resolve(DIR, `${name}.sse`), 'utf8')

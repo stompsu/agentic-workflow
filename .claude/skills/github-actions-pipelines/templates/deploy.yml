@@ -39,7 +39,7 @@ jobs:
         with:
           context: src/backend
           push: true
-          tags: ${{ vars.ACR_NAME }}.azurecr.io/support-backend:${{ steps.meta.outputs.tag }}
+          tags: ${{ vars.ACR_NAME }}.azurecr.io/agentic-workflow-backend:${{ steps.meta.outputs.tag }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
       - name: Build and push frontend
@@ -47,7 +47,7 @@ jobs:
         with:
           context: src/frontend
           push: true
-          tags: ${{ vars.ACR_NAME }}.azurecr.io/support-frontend:${{ steps.meta.outputs.tag }}
+          tags: ${{ vars.ACR_NAME }}.azurecr.io/agentic-workflow-frontend:${{ steps.meta.outputs.tag }}
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 

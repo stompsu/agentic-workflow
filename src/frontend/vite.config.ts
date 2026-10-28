@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 
-// Local backend dev port: src/backend/src/SupportChat.Api/Properties/launchSettings.json
+// Local backend dev port: src/backend/src/AgenticWorkflow.Api/Properties/launchSettings.json
 const BACKEND = process.env.BACKEND_URL ?? 'http://localhost:5080';
 
 export default defineConfig(({ command, mode }) => {

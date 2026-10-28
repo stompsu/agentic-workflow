@@ -36,15 +36,15 @@ In the tenant: Entra ID -> App registrations -> New registration. Supported acco
 
 | Env | Tenant | API app | SPA app |
 |---|---|---|---|
-| dev | nonprod | `supportchat-api-dev` | `supportchat-spa-dev` |
-| test | nonprod | `supportchat-api-test` | `supportchat-spa-test` |
-| prod | prod | `supportchat-api-prod` | `supportchat-spa-prod` |
+| dev | nonprod | `agentwf-api-dev` | `agentwf-spa-dev` |
+| test | nonprod | `agentwf-api-test` | `agentwf-spa-test` |
+| prod | prod | `agentwf-api-prod` | `agentwf-spa-prod` |
 
 ### 2.1 API app
 1. Register (no redirect URI). Record `<api-id>`.
 2. Expose an API -> Application ID URI -> Add -> accept `api://<api-id>` -> Save.
 3. Add a scope: name `access_as_user`, Who can consent: Admins only, display names/descriptions
-   "Access Support Chat as the signed-in user", State Enabled.
+   "Access Agentic Workflow as the signed-in user", State Enabled.
 4. Manifest: set `requestedAccessTokenVersion` (in `api`) to `2` if it is not already 2. Save.
 5. No client secret, no app roles (the API only validates tokens).
 
@@ -148,7 +148,7 @@ Common steps:
 3. User attributes: Display Name (keep minimal; email comes from the provider when shared).
 4. Create.
 5. Open the user flow -> Applications -> Add application -> select the SPA app(s) of that tenant
-   (`supportchat-spa-dev` and `supportchat-spa-test` in nonprod; `supportchat-spa-prod` in prod). An application can have
+   (`agentwf-spa-dev` and `agentwf-spa-test` in nonprod; `agentwf-spa-prod` in prod). An application can have
    only one user flow; one flow may serve several apps. The API app is not added.
 6. Test: User flows -> SignUpSignIn -> Run user flow (or sign in from the SPA) with every enabled method.
 
@@ -191,7 +191,7 @@ so the redirect URI is `<origin>/redirect.html`.
 | test | `https://<test-frontend-fqdn>/redirect.html` |
 | prod | `https://<prod-frontend-fqdn>/redirect.html` |
 
-`<env-frontend-fqdn>` = Container App FQDN from azure-infra outputs, e.g. `ca-supportchat-web-dev.<env-unique>.<region>.azurecontainerapps.io`.
+`<env-frontend-fqdn>` = Container App FQDN from azure-infra outputs, e.g. `ca-agentwf-web-dev.<env-unique>.<region>.azurecontainerapps.io`.
 No custom domain for now (D10): the frontend uses the Container App FQDN and auth stays on `<sub>.ciamlogin.com`
 (Learn Q&A reports social providers may not work through External ID custom URL domains). Adding a frontend custom
 domain later means adding its `/redirect.html` URI here and updating the Facebook Site URL and section 4.1 URL; the

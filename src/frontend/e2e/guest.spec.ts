@@ -78,9 +78,9 @@ test('guest: Continue as guest -> badge -> send -> streamed answer -> End guest 
   await expect(page.getByText('Guest', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
   expect(tokenRequests).toBe(1);
-  const stored = await page.evaluate(() => sessionStorage.getItem('supportchat.guest'));
+  const stored = await page.evaluate(() => sessionStorage.getItem('agentwf.guest'));
   expect(JSON.parse(stored!).accessToken).toBe(GUEST_TOKEN);
-  expect(await page.evaluate(() => localStorage.getItem('supportchat.guest'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('agentwf.guest'))).toBeNull();
 
   await page.getByRole('textbox', { name: 'Message' }).fill('How long does a claim take?');
   await page.getByRole('button', { name: 'Send' }).click();
@@ -105,7 +105,7 @@ test('guest: Continue as guest -> badge -> send -> streamed answer -> End guest 
   await expect(page.getByText('Your guest session has ended and its chats were deleted.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Continue as guest' })).toBeVisible();
   expect(ended).toBe(true);
-  expect(await page.evaluate(() => sessionStorage.getItem('supportchat.guest'))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem('agentwf.guest'))).toBeNull();
   expect(authHeaders.length).toBeGreaterThan(0);
   expect(authHeaders.every((h) => h === `Bearer ${GUEST_TOKEN}`)).toBe(true);
 });
@@ -126,7 +126,7 @@ test('guest: 401 guest_expired is not retried and returns to the login page with
   await expect(page.getByText('Your guest session has ended.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Continue as guest' })).toBeVisible();
   expect(workflowCalls).toBe(1);
-  expect(await page.evaluate(() => sessionStorage.getItem('supportchat.guest'))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem('agentwf.guest'))).toBeNull();
 });
 
 test('login page has no guest button when guest access is disabled in config', async ({ page }) => {

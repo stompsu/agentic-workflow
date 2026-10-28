@@ -3,7 +3,7 @@
 # Normally NOT needed: main.bicep writes the default query key itself (writeSearchQueryKeyFromBicep=true).
 # Use this only when that param is false (or the default query key was deleted).
 #
-# Idempotent: reuses the key named supportchat-api, creates it only if absent; skips the Key Vault write when the
+# Idempotent: reuses the key named agentwf-api, creates it only if absent; skips the Key Vault write when the
 # secret already exists unless FORCE=1. The key value is never printed or put on a command line.
 # Needs: az login; "Search Service Contributor" (list/create query keys) on the Search service;
 #        "Key Vault Secrets Officer" on the vault. Run by the user, not by pipelines.
@@ -16,7 +16,7 @@ if [[ $# -ne 3 ]]; then
   exit 2
 fi
 RG="$1"; SEARCH="$2"; VAULT="$3"
-KEY_NAME="supportchat-api"
+KEY_NAME="agentwf-api"
 SECRET_NAME="search-query-key"
 
 if [[ "${FORCE:-0}" != "1" ]] && az keyvault secret show --vault-name "$VAULT" --name "$SECRET_NAME" --query id -o tsv >/dev/null 2>&1; then

@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AgenticWorkflow.Agents/AgenticWorkflow.Agents.csproj" />
+    <Project Path="src/AgenticWorkflow.Api/AgenticWorkflow.Api.csproj" />
+    <Project Path="src/AgenticWorkflow.Core/AgenticWorkflow.Core.csproj" />
+    <Project Path="src/AgenticWorkflow.Infrastructure/AgenticWorkflow.Infrastructure.csproj" />
+    <Project Path="src/AgenticWorkflow.Ingestion/AgenticWorkflow.Ingestion.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AgenticWorkflow.Agents.Tests/AgenticWorkflow.Agents.Tests.csproj" />
+    <Project Path="tests/AgenticWorkflow.Api.Tests/AgenticWorkflow.Api.Tests.csproj" />
+    <Project Path="tests/AgenticWorkflow.Infrastructure.Tests/AgenticWorkflow.Infrastructure.Tests.csproj" />
+    <Project Path="tests/AgenticWorkflow.Ingestion.Tests/AgenticWorkflow.Ingestion.Tests.csproj" />
+  </Folder>
+</Solution>

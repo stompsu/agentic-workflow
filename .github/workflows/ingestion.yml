@@ -10,7 +10,7 @@ on:
         options: [dev, test, prod]
         default: dev
       tag:
-        description: Optional image tag of support-ingestion to run (empty = the job's current image)
+        description: Optional image tag of agentic-workflow-ingestion to run (empty = the job's current image)
         type: string
         default: ''
 
@@ -55,7 +55,7 @@ jobs:
         run: |
           az config set extension.use_dynamic_install=yes_without_prompt
           if [ -n "$TAG" ]; then
-            az containerapp job update -n "$INGESTION_JOB" -g "$RG" --image "$ACR.azurecr.io/support-ingestion:$TAG"
+            az containerapp job update -n "$INGESTION_JOB" -g "$RG" --image "$ACR.azurecr.io/agentic-workflow-ingestion:$TAG"
           fi
           EXEC=$(az containerapp job start -n "$INGESTION_JOB" -g "$RG" --query name -o tsv)
           echo "Started execution $EXEC"

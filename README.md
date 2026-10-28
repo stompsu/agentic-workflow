@@ -1,4 +1,4 @@
-# Support assistant (agentic workflow chat)
+# Agentic Workflow
 
 A chat application where users sign in with a social account (Google, Facebook, ...) and talk to a multi-agent
 workflow. The first workflow, **SupportTicket**, classifies a request as Policy, Claims or HealthAssessments and routes it
@@ -33,7 +33,7 @@ flowchart LR
 ## Repository layout
 
 ```
-src/backend/      .NET 10 solution (SupportChat.slnx): Core, Infrastructure, Agents, Api, Ingestion + tests; Dockerfile(s)
+src/backend/      .NET 10 solution (AgenticWorkflow.slnx): Core, Infrastructure, Agents, Api, Ingestion + tests; Dockerfile(s)
 src/frontend/     Vite + React + TypeScript SPA, nginx config, Dockerfile, Playwright e2e
 infra/            Bicep (main.bicep, modules/, params/{dev,test,prod}.bicepparam, scripts/)
 knowledge/        source documents for ingestion (policy, claims, health)
@@ -47,12 +47,12 @@ scripts/          setup-github-oidc.sh (one-time, run by the user)
 
 Backend (details: [src/backend/README.md](src/backend/README.md)):
 ```bash
-cd src/backend/src/SupportChat.Api
+cd src/backend/src/AgenticWorkflow.Api
 dotnet user-secrets set "Cosmos:Endpoint" "https://<account>.documents.azure.com:443/"
 dotnet user-secrets set "Cosmos:Key" "<key>"          # Development uses Azure:AuthMode=Key
 dotnet user-secrets set "Search:Endpoint" "..."; dotnet user-secrets set "Search:Key" "<query key>"
 # plus AzureAd:* and Foundry:ProjectEndpoint, see the backend README
-cd ../../../.. && dotnet run --project src/backend/src/SupportChat.Api   # http://localhost:5080
+cd ../../../.. && dotnet run --project src/backend/src/AgenticWorkflow.Api   # http://localhost:5080
 ```
 Secrets are never committed; use user-secrets or Key Vault references.
 
@@ -62,7 +62,7 @@ cd src/frontend && npm ci && npm run dev    # http://localhost:5173, /api proxie
 ```
 Override the proxy target with `BACKEND_URL`. Runtime config comes from `/config.json` (`public/config.json` locally).
 
-Cosmos emulator: `CosmosEmulatorTests` in `SupportChat.Infrastructure.Tests` run against the Azure Cosmos DB emulator and are
+Cosmos emulator: `CosmosEmulatorTests` in `AgenticWorkflow.Infrastructure.Tests` run against the Azure Cosmos DB emulator and are
 skipped unless it answers at `COSMOS_EMULATOR_ENDPOINT` (default `https://localhost:8081/`; key override
 `COSMOS_EMULATOR_KEY`). Start the emulator, then `dotnet test src/backend`. CI has no emulator, so they are skipped there.
 
@@ -79,7 +79,7 @@ Real social login is verified manually (not in the pipeline).
 
 ```
 PR            -> ci (build/test, lint, e2e, bicep lint, docker build validation)
-push to main  -> ci -> build + push support-{backend,frontend,ingestion}:<short-sha> to the shared ACR (once)
+push to main  -> ci -> build + push agentic-workflow-{backend,frontend,ingestion}:<short-sha> to the shared ACR (once)
               -> deploy dev -> deploy test (approval) -> MI smoke job (--smoke-check) -> deploy prod (approval)
 ```
 Same image tag is promoted through all stages. Azure authentication is OIDC (no stored Azure secrets). Infra changes go

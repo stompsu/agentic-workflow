@@ -1,4 +1,4 @@
-// Support chat infrastructure for ONE environment (dev | test | prod), deployed at resource-group scope:
+// Agentic Workflow infrastructure for ONE environment (dev | test | prod), deployed at resource-group scope:
 //   az deployment group create -g <rg> --parameters infra/params/<env>.bicepparam
 // See infra/README.md. No secret values pass through parameters or outputs.
 targetScope = 'resourceGroup'
@@ -8,7 +8,7 @@ param environmentName string
 param location string = resourceGroup().location
 @minLength(3)
 @maxLength(12)
-param namePrefix string = 'supportchat'
+param namePrefix string = 'agentwf'
 
 // ---- shared registry -------------------------------------------------------------------------------------------
 @description('Name of the shared ACR (5-50 alphanumeric, globally unique).')
@@ -45,7 +45,7 @@ param requiredScopes string = 'access_as_user'
 param spaClientId string
 param spaAuthority string
 param apiScope string
-param searchIndexName string = 'support-knowledge'
+param searchIndexName string = 'agentwf-knowledge'
 param echoWorkflowEnabled bool = false
 
 // ---- retention, sign-in options, workflow models (plan.md section 3 Phase 5; D6, D7, D8) ---------------------------
@@ -102,7 +102,7 @@ param writeSearchQueryKeyFromBicep bool = true
 param deploySmokeJob bool = false
 
 // ---- ingestion job -------------------------------------------------------------------------------------------------
-@description('Image of the ingestion console app (shared ACR: support-ingestion). Empty = no job.')
+@description('Image of the ingestion console app (shared ACR: agentic-workflow-ingestion). Empty = no job.')
 param ingestionImage string = ''
 @description('Create the dedicated ingestion identity and the manual ingestion Container Apps Job (needs ingestionImage).')
 param deployIngestionJob bool = false
@@ -130,7 +130,7 @@ var guestDataTtl = guestTtlDays > 0 ? '${guestTtlDays}.${guestTtlTime}' : guestT
 var guestRetentionHours = (guestDataTtlMinutes + 59) / 60
 var base = '${namePrefix}-${environmentName}'
 var uniq = take(uniqueString(resourceGroup().id), 5)
-var tags = { app: 'supportchat', environment: environmentName }
+var tags = { app: 'agentwf', environment: environmentName }
 
 var placeholderImage = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 var placeholderPort = 80
@@ -314,7 +314,7 @@ var guestEnv = concat(
   guestOn ? concat([
     { name: 'Guest__SigningMode', value: 'KeyVault' }
     { name: 'Guest__SigningKeyUri', value: '${keyVault.outputs.vaultUri}keys/${guestKeyName}' }
-    { name: 'Guest__Issuer', value: 'supportchat-guest-${environmentName}' }
+    { name: 'Guest__Issuer', value: 'agentwf-guest-${environmentName}' }
     { name: 'Guest__MaxLifetime', value: guestLifetime }
     { name: 'Guest__TrustClientIpHeader', value: 'true' }
   ],

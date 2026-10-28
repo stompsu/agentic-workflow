@@ -13,7 +13,7 @@ and a `what-if` before the first real deploy. No secret values exist in params o
 | `acr` / `acr-pull` | Shared ACR (dev only); AcrPull for the identity (scope = ACR resource group) |
 | `keyvault` / `keyvault-secrets` | Key Vault (RBAC mode); dev/test: Secrets User for the identity, `cosmos-key` and `search-query-key` secrets; guests enabled: key `guest-token-signing` and Key Vault Crypto User for the identity (`cryptoUserPrincipalId`, independent of the secrets role) |
 | `guest-alert` | guests enabled and `alertEmail` set: action group (email) + scheduled-query alert on the backend events `GuestSigningKeyNearExpiry` / `GuestSigningKeyUnavailable` / `GuestSigningKeyRefreshFailing` (3 consecutive failed refreshes or a startup prefill failure; Application Insights `traces`) |
-| `cosmos` | Account (serverless dev/test, autoscale prod, `disableLocalAuth` in prod), db `supportchat`, container `chat` (`/userId`, indexing policy, `defaultTtl -1`), data-plane role (prod, test) |
+| `cosmos` | Account (serverless dev/test, autoscale prod, `disableLocalAuth` in prod), db `agentwf`, container `chat` (`/userId`, indexing policy, `defaultTtl -1`), data-plane role (prod, test) |
 | `search` | AI Search (semantic ranker `standard`, system identity; `aadOrApiKey` dev/test, local auth disabled prod), Search Index Data Reader (prod, test) |
 | `container-env` | Container Apps environment |
 | `containerapp` | Generic app: used for backend (internal ingress, `/healthz` startup+liveness, `/readyz` readiness, HTTP-concurrency scale rule, min replicas 1 in prod) and frontend (external ingress) |
@@ -47,7 +47,7 @@ Foundry: `foundryProjectResourceId` (default empty) -> "Azure AI User" for the i
 
 When enabled the backend and the smoke job also get `Guest__SigningMode=KeyVault`,
 `Guest__SigningKeyUri=https://<vault>.vault.azure.net/keys/guest-token-signing` (versionless),
-`Guest__Issuer=supportchat-guest-<env>` and `Guest__TrustClientIpHeader=true`. The smoke job (test) uses the same app identity, so it
+`Guest__Issuer=agentwf-guest-<env>` and `Guest__TrustClientIpHeader=true`. The smoke job (test) uses the same app identity, so it
 signs through the same Crypto User role; a missing role surfaces as a 403 in `--smoke-check`.
 
 - Key: `kty EC`, `P-256`, `keyOps sign/verify`, no expiry on the initial version, rotation policy Rotate after 90 days, Notify 30 days
@@ -135,7 +135,7 @@ fails if they (or `embeddingDeployment`, when `deployIngestionJob = true`) are s
 
 ## Ingestion job
 
-Params: `deployIngestionJob` (default false), `ingestionImage` (`<acr>/support-ingestion:<tag>`, empty = no job),
+Params: `deployIngestionJob` (default false), `ingestionImage` (`<acr>/agentic-workflow-ingestion:<tag>`, empty = no job),
 `embeddingDeployment`, `modelResourceId` (or `vectorizerResourceUri`), `foundryProjectEndpoint`, `foundryProjectResourceId`,
 `ingestionSourcePath` (default `/app/knowledge`; `Dockerfile.ingestion` must copy `knowledge/` there).
 Creates job `caj-<base>-ingest` (manual trigger, 0.5 cpu / 1Gi, replicaTimeout 1800 s, no retry) with a dedicated identity:
@@ -154,7 +154,7 @@ vectorizer uri are missing, so set those params first.
 
 Start manually (after the image is pushed): `az containerapp job start -g <rg> -n <ingestionJobName>`; follow with
 `az containerapp job execution list -g <rg> -n <ingestionJobName>`. First-deploy order: infra with `deployIngestionJob=false`
--> build/push `support-ingestion` -> redeploy infra with `deployIngestionJob=true` and `ingestionImage` (also pass the current
+-> build/push `agentic-workflow-ingestion` -> redeploy infra with `deployIngestionJob=true` and `ingestionImage` (also pass the current
 backend/frontend images) -> wait for role propagation -> start the job -> deploy/verify the backend. The search service identity
 needs OpenAI User on the model account (`modelResourceId`) for the integrated vectorizer. Re-run the infra deploy if the first
 attempt fails on Key Vault / role propagation.

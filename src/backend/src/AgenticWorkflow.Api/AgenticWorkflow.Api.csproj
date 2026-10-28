@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <UserSecretsId>d6f2a1c0-5b1e-4c52-9a53-3c6f6a3f7a10</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AgenticWorkflow.Core/AgenticWorkflow.Core.csproj" />
+    <ProjectReference Include="../AgenticWorkflow.Infrastructure/AgenticWorkflow.Infrastructure.csproj" />
+    <ProjectReference Include="../AgenticWorkflow.Agents/AgenticWorkflow.Agents.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Identity.Web" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AgenticWorkflow.Api.Tests" />
+  </ItemGroup>
+</Project>

@@ -45,7 +45,7 @@ config errors before the prod approval:
 ### 2. One factory, services never read keys
 
 ```csharp
-// SupportChat.Infrastructure.Azure
+// AgenticWorkflow.Infrastructure.Azure
 public interface IAzureCredentialProvider
 {
     TokenCredential Credential { get; }       // singleton, used for AIProjectClient and for MI-mode Cosmos/Search
@@ -62,7 +62,7 @@ public interface IAzureClientFactory
   / index management uses it (`Ingestion:SearchAdminKey`, data-model 2.6).
 - ManagedIdentity mode: same constructors with `IAzureCredentialProvider.Credential`.
 - `CosmosClient` and `SearchClient` are registered as singletons created by the factory; `CosmosClientOptions` use
-  `System.Text.Json` serializer with camelCase properties and camelCase string enums, `ApplicationName = "supportchat-api"`.
+  `System.Text.Json` serializer with camelCase properties and camelCase string enums, `ApplicationName = "agentwf-api"`.
 - `ChatClientFactory` (Infrastructure implementation of the Core `IChatClientFactory`, ADR 0002 section 4) gets the
   credential from `IAzureCredentialProvider` and builds `AIProjectClient` lazily; there is no key path for models.
 - Only the factory and options classes reference `Cosmos:Key` / `Search:Key`. qa-reviewer greps for any other use.
@@ -146,7 +146,7 @@ enforces the endpoint.
     resource, never a Bicep output).
   - Search QUERY key: Bicep cannot create query keys. `infra/scripts/ensure-search-query-key.sh` (owner azure-infra;
     run by the user once per dev/test environment after the first infra deploy, before the backend revision needs the
-    secret; documented in `infra/README.md`) creates query key `supportchat-api` if absent and writes it to Key Vault
+    secret; documented in `infra/README.md`) creates query key `agentwf-api` if absent and writes it to Key Vault
     secret `search-query-key` without printing it. Not run by pipelines in v1.
 - No Foundry secret in any environment (D5).
 - Prod: no keys anywhere; Cosmos `disableLocalAuth = true`, Search `disableLocalAuth = true` (azure-infra); no query key.

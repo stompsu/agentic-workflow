@@ -12,26 +12,26 @@ Contract changes go through architect first. qa-reviewer gates the end of every 
 ```
 src/
   backend/
-    SupportChat.slnx                    # single solution: `dotnet build/test src/backend`
-    Dockerfile                          # multi-stage, non-root, image support-backend
+    AgenticWorkflow.slnx                    # single solution: `dotnet build/test src/backend`
+    Dockerfile                          # multi-stage, non-root, image agentic-workflow-backend
     Directory.Packages.props            # central package versions (exact pins, see section 4)
     src/
-      SupportChat.Core/                 # contracts only: workflows, events, stores + records, ICurrentUser, IKnowledgeSearch,
+      AgenticWorkflow.Core/                 # contracts only: workflows, events, stores + records, ICurrentUser, IKnowledgeSearch,
                                         # IChatClientFactory, IPromptProvider, options
-      SupportChat.Infrastructure/       # Cosmos stores, Search, IAzureCredentialProvider, IAzureClientFactory,
+      AgenticWorkflow.Infrastructure/       # Cosmos stores, Search, IAzureCredentialProvider, IAzureClientFactory,
                                         # ChatClientFactory (implements Core IChatClientFactory; lazy AIProjectClient)
-      SupportChat.Agents/               # workflow registry, EmbeddedPromptProvider (implements IPromptProvider),
+      AgenticWorkflow.Agents/               # workflow registry, EmbeddedPromptProvider (implements IPromptProvider),
                                         # Knowledge/ (search_knowledge, CitationCollector),
                                         # Workflows/SupportTicket (+ Prompts/*.md embedded), Workflows/Echo (config-gated)
-      SupportChat.Api/                  # minimal APIs, auth, SSE writer, ChatHistoryBuilder (token trimming), ProblemDetails,
+      AgenticWorkflow.Api/                  # minimal APIs, auth, SSE writer, ChatHistoryBuilder (token trimming), ProblemDetails,
                                         # health, startup validation, --smoke-check
-      SupportChat.Ingestion/            # console app: chunk + embed + upsert to Search (Phase 2)
+      AgenticWorkflow.Ingestion/            # console app: chunk + embed + upsert to Search (Phase 2)
     tests/
-      SupportChat.Api.Tests/            # WebApplicationFactory, fake auth, in-memory stores, throwaway workflow, SSE golden files
-      SupportChat.Agents.Tests/         # fake IChatClient: classification, threshold, routing, citations, injection
-      SupportChat.Infrastructure.Tests/ # factory paths, auth-mode validation, query construction, Cosmos emulator isolation (optional)
+      AgenticWorkflow.Api.Tests/            # WebApplicationFactory, fake auth, in-memory stores, throwaway workflow, SSE golden files
+      AgenticWorkflow.Agents.Tests/         # fake IChatClient: classification, threshold, routing, citations, injection
+      AgenticWorkflow.Infrastructure.Tests/ # factory paths, auth-mode validation, query construction, Cosmos emulator isolation (optional)
   frontend/
-    Dockerfile                          # build stage + nginx, image support-frontend
+    Dockerfile                          # build stage + nginx, image agentic-workflow-frontend
     nginx/default.conf.template         # /api proxy (proxy_buffering off etc., api-contract section 7), /data-deletion.html
     docker-entrypoint.d/                # writes /config.json and fills /data-deletion.html from env vars at start
     public/data-deletion.html           # Facebook data deletion instructions page with placeholders (auth-setup 4.1)
@@ -67,7 +67,7 @@ Dependency direction: Api -> Agents -> Core; Api -> Infrastructure -> Core; Agen
 | infra -> pipelines | Bicep outputs: resource group, ACR name, backend app, frontend app, MI smoke job name; GitHub env vars `AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, ACR_NAME, BACKEND_APP, FRONTEND_APP` (+ `MI_SMOKE_JOB` in test) | github-actions-pipelines skill (templates/) |
 | infra -> backend / frontend | env vars in section 5 | this file |
 
-Store contracts and records (Core, namespace `SupportChat.Core.Storage`):
+Store contracts and records (Core, namespace `AgenticWorkflow.Core.Storage`):
 ```csharp
 // Turn lock held by one in-flight turn. LeaseId is the turn id (= WorkflowRunRequest.TurnId), stored in the session
 // document as activeTurn.turnId. AssistantMessageId is generated at turn start and used for done/failed/cancelled.
@@ -165,7 +165,7 @@ The phase split below follows the user's fixed brief (2026-10-25); task content 
   assignment, Search Index Data Reader, min replicas 1, HTTP concurrency scale rule, autoscale Cosmos. Test: same data
   roles for the UAMI, Search `aadOrApiKey`. Document pipeline identity roles.
   Search query key (S4): Bicep cannot create query keys. Decision: azure-infra (owner) writes
-  `infra/scripts/ensure-search-query-key.sh` (az CLI, idempotent: create query key `supportchat-api` if absent, write it
+  `infra/scripts/ensure-search-query-key.sh` (az CLI, idempotent: create query key `agentwf-api` if absent, write it
   to Key Vault secret `search-query-key` without printing it). The USER runs it once per dev/test environment after
   the first infra deploy (documented in `infra/README.md` with the required roles and the first-deploy order: the
   secret must exist before the backend revision references it). Not run by pipelines in v1; moving it into the deploy
@@ -199,7 +199,7 @@ The phase split below follows the user's fixed brief (2026-10-25); task content 
   allowed in Development/Dev/Test, startup fails if enabled in Production; ADR 0002 section 10). It streams the input
   back word by word and proves zero-change addability. Fake `IChatClient` test helpers.
 - agent-workflows: SupportTicket per ADR 0002 section 6 (plain C# orchestration, D2): structured classification,
-  threshold, clarification, routing, specialists; prompt files v1; shared `SupportChat.Agents.Knowledge`
+  threshold, clarification, routing, specialists; prompt files v1; shared `AgenticWorkflow.Agents.Knowledge`
   (`search_knowledge` + `CitationCollector`) with `&<>` encoding and http(s)-only URLs; history handling; domain
   constants; rationale logging rule; verify `ChatClientFactory` against the pinned Foundry prerelease (D1) and
   `store=false` (D3); tests: routing per category, low confidence -> clarification, max consecutive clarifications,
@@ -215,7 +215,7 @@ The phase split below follows the user's fixed brief (2026-10-25); task content 
   `error internal_error`; deleting session -> POST messages 404; failure before `session` -> 500 with lock released;
   non-abort `OperationCanceledException` -> `internal_error`.
 - backend-dotnet: `IKnowledgeSearch` over `SearchClient` (hybrid + semantic + domain filter, data-model 2.4, domain
-  regex check); `SupportChat.Ingestion` console app skeleton (chunking, deterministic ids, upsert/delete, admin key or
+  regex check); `AgenticWorkflow.Ingestion` console app skeleton (chunking, deterministic ids, upsert/delete, admin key or
   Contributor RBAC only here); index definition as code or JSON. Set `Foundry:ProjectEndpoint` (now required by
   validation because SupportTicket is registered).
 - azure-infra: set `foundryProjectResourceId` (role assignment), Search MI -> "Cognitive Services OpenAI User" on the
@@ -345,11 +345,11 @@ Durations are `TimeSpan` strings (`hh:mm:ss`).
 | `Auth:RequiredScopes` | `access_as_user` | no | |
 | `Cosmos:Endpoint` | `https://<acct>.documents.azure.com:443/` | no | |
 | `Cosmos:Key` | KV reference | yes | Key mode only; must be absent in Production |
-| `Cosmos:DatabaseName` | `supportchat` | no | |
+| `Cosmos:DatabaseName` | `agentwf` | no | |
 | `Cosmos:ContainerName` | `chat` | no | |
 | `Search:Endpoint` | `https://<svc>.search.windows.net` | no | |
 | `Search:Key` | KV reference (`search-query-key`) | yes | QUERY key; Key mode only; must be absent in Production |
-| `Search:IndexName` | `support-knowledge` | no | |
+| `Search:IndexName` | `agentwf-knowledge` | no | |
 | `Search:TopK` | `5` | no | |
 | `Search:MinRerankerScore` | `1.5` | no | |
 | `Foundry:ProjectEndpoint` | `https://<res>.services.ai.azure.com/api/projects/<project>` | no | TokenCredential only; required only when a non-echo workflow is registered (ADR 0003 rule 7); value supplied by the user (D8) |
@@ -374,8 +374,8 @@ Durations are `TimeSpan` strings (`hh:mm:ss`).
 | `Guest:SigningMode` | `KeyVault` | no | `KeyVault` / `Ephemeral`; `Ephemeral` only in `Development` (ADR 0003 rule 14) |
 | `Guest:SigningKeyUri` | `https://<vault>.vault.azure.net/keys/guest-token-signing` | no | versionless; required when enabled in `KeyVault` mode (rule 15). Not a secret: the private key never leaves Key Vault |
 | `Guest:SigningKeyRefreshInterval` | `01:00:00` | no | `00:05:00`..`01:00:00` (ADR 0006 section 5.4) |
-| `Guest:Issuer` | `supportchat-guest-<env>` | no | required when enabled; `^[a-z0-9-]{3,64}$`; never an Entra issuer (rule 12) |
-| `Guest:Audience` | `supportchat-api-guest` | no | `^[a-z0-9-]{3,64}$`; disjoint from the Entra audiences both ways (rule 13) |
+| `Guest:Issuer` | `agentwf-guest-<env>` | no | required when enabled; `^[a-z0-9-]{3,64}$`; never an Entra issuer (rule 12) |
+| `Guest:Audience` | `agentwf-api-guest` | no | `^[a-z0-9-]{3,64}$`; disjoint from the Entra audiences both ways (rule 13) |
 | `Guest:MaxLifetime` | `04:00:00` | no | `00:30:00`..`12:00:00`; token `exp` = guest identity end (G5) |
 | `Guest:DataTtl` | `04:15:00` | no | `>= MaxLifetime + 00:05:00`, `<= 7.00:00:00`; `ttl` of every guest document (data-model 1.3) |
 | `Guest:ActiveCheckCacheDuration` | `00:01:00` | no | `00:00:10`..`00:05:00`; per-replica guest-document check (G17) |
@@ -502,7 +502,7 @@ ADR 0001 revision note; ADR 0003 rules 12-17; config keys in section 5. Implemen
 | From -> To | Interface | Defined in |
 |---|---|---|
 | SPA -> API | `POST /api/guest/token` (`{accessToken, tokenType, expiresAt}`), new error codes, amended 401/403/429 semantics | api-contract 1, 2.9, 3, 5 (applied 2026-10-27; ADR 0006 section 7 is the record) |
-| SPA tab <-> SPA tab | `BroadcastChannel("supportchat-guest")`: `guest-token-request`, `guest-token` (reply, only tokens with > 60 s left), `guest-ended` | ADR 0006 section 4 |
+| SPA tab <-> SPA tab | `BroadcastChannel("agentwf-guest")`: `guest-token-request`, `guest-token` (reply, only tokens with > 60 s left), `guest-ended` | ADR 0006 section 4 |
 | nginx -> API | header `X-Client-Ip` (rightmost `X-Forwarded-For` entry, overwrites client value; set only in `location /api/`; `map` in `conf.d`) | api-contract 7, ADR 0006 section 9.4 |
 | API auth -> API | `CurrentUser.TryGetUser(principal, out userId, out UserKind)` (discriminator = `AuthenticationType "guest"` + validated `iss`); `ChatUserRequirement` in both the `ChatUser` and fallback policies; `ICurrentUser.IsGuest` (additive) | ADR 0006 section 5.3 |
 | API -> Key Vault | `IGuestTokenSigner` (`SignAsync`, sync `ResolveValidationKey`), `GuestSigningKeyCache` + `GuestSigningKeyRefresher` hosted service | ADR 0006 sections 5.4-5.5 |
@@ -563,7 +563,7 @@ ADR 0001 revision note; ADR 0003 rules 12-17; config keys in section 5. Implemen
   config-parameterized registration of the SupportTicket definition (`support-ticket-guest`) with its own deployments.
 - frontend-react:
   - Auth: guest mode alongside MSAL (`AuthContextValue` gains `mode: 'social' | 'guest'` and `loginAsGuest()`); guest
-    token + `expiresAt` in `sessionStorage` (`supportchat.guest`); no refresh; timer at `expiresAt` ends guest mode;
+    token + `expiresAt` in `sessionStorage` (`agentwf.guest`); no refresh; timer at `expiresAt` ends guest mode;
     start-up order per ADR 0006 section 4 (an MSAL account wins and the stale guest token is removed; no blocking
     BroadcastChannel wait, background hand-off within 300 ms, only tokens with > 60 s left are handed over); logout in
     either mode clears guest storage and broadcasts `guest-ended`.
@@ -594,7 +594,7 @@ ADR 0001 revision note; ADR 0003 rules 12-17; config keys in section 5. Implemen
   params `guestAccessEnabled` (dev true, test true, prod false), `guestMaxLifetimeHours` (4), `guestDataTtlMinutes`
   (255), optional caps (`guestMaxCreationsPerHour`, `guestMaxTurns`, `guestMaxSessions`, `guestMaxTurnsPerHour`,
   `guestMaxTurnsPerDay`); backend `Guest__*` env (incl. `Guest__TrustClientIpHeader=true`,
-  `Guest__Issuer=supportchat-guest-<env>`), smoke job env, frontend `AUTH_GUEST_ENABLED` / `APP_GUEST_SESSION_HOURS` /
+  `Guest__Issuer=agentwf-guest-<env>`), smoke job env, frontend `AUTH_GUEST_ENABLED` / `APP_GUEST_SESSION_HOURS` /
   `APP_GUEST_RETENTION_HOURS` derived from the same params; `infra/README.md` notes; what-if review by the user.
 - devops-pipelines: none expected (no workflow change; images unchanged; infra deployed by the user, D11).
 - qa-reviewer: contract compliance of the new endpoint/codes and the amended 2.8/3/5 text; scheme discriminator and

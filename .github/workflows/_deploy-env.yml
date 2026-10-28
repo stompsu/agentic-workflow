@@ -50,10 +50,10 @@ jobs:
           # Revision suffix: starts with a letter, lowercase, short, unique per run attempt.
           SUFFIX="r${TAG}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
           az containerapp update -n "$BACKEND_APP" -g "$RG" \
-            --image "$ACR.azurecr.io/support-backend:$TAG" \
+            --image "$ACR.azurecr.io/agentic-workflow-backend:$TAG" \
             --revision-suffix "$SUFFIX"
           az containerapp update -n "$FRONTEND_APP" -g "$RG" \
-            --image "$ACR.azurecr.io/support-frontend:$TAG" \
+            --image "$ACR.azurecr.io/agentic-workflow-frontend:$TAG" \
             --revision-suffix "$SUFFIX"
 
       - name: Smoke test (through the frontend proxy)
@@ -74,7 +74,7 @@ jobs:
         if: vars.INGESTION_JOB != ''
         run: |
           az containerapp job update -n "$INGESTION_JOB" -g "$RG" \
-            --image "$ACR.azurecr.io/support-ingestion:$TAG"
+            --image "$ACR.azurecr.io/agentic-workflow-ingestion:$TAG"
 
       # Pre-prod gate (ADR 0003 1a). The job definition in Bicep carries args=[--smoke-check],
       # Azure__AuthMode=ManagedIdentity and no keys; updating only the image keeps all of that.
@@ -86,7 +86,7 @@ jobs:
             exit 1
           fi
           az containerapp job update -n "$MI_SMOKE_JOB" -g "$RG" \
-            --image "$ACR.azurecr.io/support-backend:$TAG"
+            --image "$ACR.azurecr.io/agentic-workflow-backend:$TAG"
           EXEC=$(az containerapp job start -n "$MI_SMOKE_JOB" -g "$RG" --query name -o tsv)
           echo "Started execution $EXEC"
           .github/scripts/wait-job-execution.sh "$MI_SMOKE_JOB" "$RG" "$EXEC" 600

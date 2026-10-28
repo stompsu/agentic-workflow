@@ -49,27 +49,27 @@ jobs:
           context: src/backend
           file: src/backend/Dockerfile
           push: true
-          tags: ${{ vars.ACR_NAME }}.azurecr.io/support-backend:${{ steps.meta.outputs.tag }}
-          cache-from: type=gha,scope=support-backend
-          cache-to: type=gha,mode=max,scope=support-backend
+          tags: ${{ vars.ACR_NAME }}.azurecr.io/agentic-workflow-backend:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=agentic-workflow-backend
+          cache-to: type=gha,mode=max,scope=agentic-workflow-backend
       - name: Build and push frontend
         uses: docker/build-push-action@v7
         with:
           context: src/frontend
           file: src/frontend/Dockerfile
           push: true
-          tags: ${{ vars.ACR_NAME }}.azurecr.io/support-frontend:${{ steps.meta.outputs.tag }}
-          cache-from: type=gha,scope=support-frontend
-          cache-to: type=gha,mode=max,scope=support-frontend
+          tags: ${{ vars.ACR_NAME }}.azurecr.io/agentic-workflow-frontend:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=agentic-workflow-frontend
+          cache-to: type=gha,mode=max,scope=agentic-workflow-frontend
       - name: Build and push ingestion
         uses: docker/build-push-action@v7
         with:
           context: .
           file: src/backend/Dockerfile.ingestion
           push: true
-          tags: ${{ vars.ACR_NAME }}.azurecr.io/support-ingestion:${{ steps.meta.outputs.tag }}
-          cache-from: type=gha,scope=support-ingestion
-          cache-to: type=gha,mode=max,scope=support-ingestion
+          tags: ${{ vars.ACR_NAME }}.azurecr.io/agentic-workflow-ingestion:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=agentic-workflow-ingestion
+          cache-to: type=gha,mode=max,scope=agentic-workflow-ingestion
 
   deploy-dev:
     needs: build-push

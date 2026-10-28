@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
-# Knowledge ingestion job image.  Image name: support-ingestion.
+# Knowledge ingestion job image.  Image name: agentic-workflow-ingestion.
 # BUILD CONTEXT IS THE REPOSITORY ROOT (the image bundles the root knowledge/ folder):
-#   docker build -f src/backend/Dockerfile.ingestion -t support-ingestion .
+#   docker build -f src/backend/Dockerfile.ingestion -t agentic-workflow-ingestion .
 # The root .dockerignore applies (src/backend/.dockerignore is only for the API image, context src/backend).
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
@@ -9,15 +9,15 @@ WORKDIR /src
 
 # Restore first (layer cache): only manifests and project files.
 COPY src/backend/Directory.Build.props src/backend/Directory.Packages.props ./
-COPY src/backend/src/SupportChat.Core/SupportChat.Core.csproj src/SupportChat.Core/
-COPY src/backend/src/SupportChat.Infrastructure/SupportChat.Infrastructure.csproj src/SupportChat.Infrastructure/
-COPY src/backend/src/SupportChat.Ingestion/SupportChat.Ingestion.csproj src/SupportChat.Ingestion/
-RUN dotnet restore src/SupportChat.Ingestion/SupportChat.Ingestion.csproj
+COPY src/backend/src/AgenticWorkflow.Core/AgenticWorkflow.Core.csproj src/AgenticWorkflow.Core/
+COPY src/backend/src/AgenticWorkflow.Infrastructure/AgenticWorkflow.Infrastructure.csproj src/AgenticWorkflow.Infrastructure/
+COPY src/backend/src/AgenticWorkflow.Ingestion/AgenticWorkflow.Ingestion.csproj src/AgenticWorkflow.Ingestion/
+RUN dotnet restore src/AgenticWorkflow.Ingestion/AgenticWorkflow.Ingestion.csproj
 
-COPY src/backend/src/SupportChat.Core/ src/SupportChat.Core/
-COPY src/backend/src/SupportChat.Infrastructure/ src/SupportChat.Infrastructure/
-COPY src/backend/src/SupportChat.Ingestion/ src/SupportChat.Ingestion/
-RUN dotnet publish src/SupportChat.Ingestion/SupportChat.Ingestion.csproj \
+COPY src/backend/src/AgenticWorkflow.Core/ src/AgenticWorkflow.Core/
+COPY src/backend/src/AgenticWorkflow.Infrastructure/ src/AgenticWorkflow.Infrastructure/
+COPY src/backend/src/AgenticWorkflow.Ingestion/ src/AgenticWorkflow.Ingestion/
+RUN dotnet publish src/AgenticWorkflow.Ingestion/AgenticWorkflow.Ingestion.csproj \
       -c Release --no-restore -o /app/publish /p:UseAppHost=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
@@ -30,4 +30,4 @@ USER $APP_UID
 ENV Ingestion__SourcePath=/app/knowledge \
     DOTNET_EnableDiagnostics=0
 # Default: ingest /app/knowledge. Extra args (e.g. --dry-run, --allow-empty) can be appended as the container command.
-ENTRYPOINT ["dotnet", "SupportChat.Ingestion.dll"]
+ENTRYPOINT ["dotnet", "AgenticWorkflow.Ingestion.dll"]

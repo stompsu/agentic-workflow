@@ -1,4 +1,4 @@
-# Support assistant frontend
+# Agentic Workflow frontend
 
 Vite + React + TypeScript (strict). Node >= 24 (`.nvmrc`).
 

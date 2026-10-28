@@ -8,7 +8,7 @@ Skills: add-workflow-type, foundry-model-access, ai-search-knowledge, sse-chat-s
 - The chat endpoint never knows which agents exist; workflows never know about HTTP, SSE or Cosmos.
 - Everything model-related is testable with a fake `IChatClient`; everything time-related with a fake `TimeProvider`.
 
-## 2. Contracts (SupportChat.Core, namespace `SupportChat.Core.Workflows`)
+## 2. Contracts (AgenticWorkflow.Core, namespace `AgenticWorkflow.Core.Workflows`)
 
 ```csharp
 public interface IWorkflowDefinition
@@ -60,7 +60,7 @@ public sealed record TurnFailed(string Code) : ChatStreamEvent;                 
 `TurnFailed` carries only a code. The user-facing text comes from the backend's code -> message table
 (api-contract 4.4); codes outside the contract set are mapped to `internal_error` (and logged).
 
-Registration (SupportChat.Agents):
+Registration (AgenticWorkflow.Agents):
 ```csharp
 public static IServiceCollection AddWorkflow<TWorkflow>(this IServiceCollection services)
     where TWorkflow : class, IWorkflowDefinition
@@ -104,16 +104,16 @@ released in `finally` (api-contract 4.5). Heartbeat and timeouts use an injected
 are identical for every workflow. Api.Tests registers a throwaway test workflow (not in production code) and drives it
 through the real endpoint to prove extensibility.
 
-## 4. Model access (interface in SupportChat.Core, implementation in SupportChat.Infrastructure)
+## 4. Model access (interface in AgenticWorkflow.Core, implementation in AgenticWorkflow.Infrastructure)
 
 ```csharp
-// SupportChat.Core (namespace SupportChat.Core.Models)
+// AgenticWorkflow.Core (namespace AgenticWorkflow.Core.Models)
 public interface IChatClientFactory
 {
     IChatClient Create(string deploymentName);
 }
 ```
-- Implementation `ChatClientFactory` lives in SupportChat.Infrastructure; Agents depends only on the Core interface.
+- Implementation `ChatClientFactory` lives in AgenticWorkflow.Infrastructure; Agents depends only on the Core interface.
 - The ONLY consumer of `AIProjectClient`. One `AIProjectClient(new Uri(Foundry:ProjectEndpoint), TokenCredential)`,
   constructed LAZILY (`Lazy<AIProjectClient>`, thread-safe) on the first `Create` call, so an app with only the echo
   workflow starts without Foundry configured. `Create` throws `InvalidOperationException` if `Foundry:ProjectEndpoint`
@@ -194,13 +194,13 @@ Confidence is model self-reported and not calibrated; the threshold is tuned wit
 ## 7. Prompts
 
 ```csharp
-// SupportChat.Core (namespace SupportChat.Core.Prompts); implemented by EmbeddedPromptProvider in SupportChat.Agents
+// AgenticWorkflow.Core (namespace AgenticWorkflow.Core.Prompts); implemented by EmbeddedPromptProvider in AgenticWorkflow.Agents
 public interface IPromptProvider
 {
     string Get(string path);   // e.g. "Workflows/SupportTicket/Prompts/orchestrator.v1.md"; throws if missing
 }
 ```
-- One file per agent, versioned in the file name: `SupportChat.Agents/Workflows/SupportTicket/Prompts/orchestrator.v1.md`,
+- One file per agent, versioned in the file name: `AgenticWorkflow.Agents/Workflows/SupportTicket/Prompts/orchestrator.v1.md`,
   `policy.v1.md`, `claims.v1.md`, `health-assessments.v1.md`. Embedded resources; loaded by `IPromptProvider.Get(path)`.
 - Changing behavior = new version file + reference change in code (reviewed in git); the used versions are written to
   `workflowMetadata.prompts` of each assistant message.
@@ -209,13 +209,13 @@ public interface IPromptProvider
 ## 8. Retrieval tool contract
 
 ```csharp
-public interface IKnowledgeSearch   // SupportChat.Core; implemented in Infrastructure over SearchClient
+public interface IKnowledgeSearch   // AgenticWorkflow.Core; implemented in Infrastructure over SearchClient
 {
     Task<IReadOnlyList<KnowledgeChunk>> SearchAsync(string domain, string query, int top, CancellationToken cancellationToken);
 }
 public sealed record KnowledgeChunk(string Id, string Domain, string Title, string Content, string? SourceUrl, double? RerankerScore);
 ```
-`search_knowledge` and `CitationCollector` live in the shared namespace `SupportChat.Agents.Knowledge` (reusable by any
+`search_knowledge` and `CitationCollector` live in the shared namespace `AgenticWorkflow.Agents.Knowledge` (reusable by any
 workflow; not inside SupportTicket). Created per turn, domain bound in code via `AIFunctionFactory.Create`:
 - Name `search_knowledge`, one parameter `query: string` (the model cannot choose or change the domain).
 - Domain values come from constants (data-model 2.5).
@@ -255,7 +255,7 @@ workflow; not inside SupportTicket). Created per turn, domain bound in code via 
 1. New class `XyzWorkflow : IWorkflowDefinition` (+ its prompt files, options under `Workflows:<PascalCaseName>`).
 2. `services.AddWorkflow<XyzWorkflow>();`
 3. Knowledge: new `domain` value(s) in the same index (constants in the workflow, documented in /docs/data-model.md 2.5)
-   and ingestion folders; reuse `SupportChat.Agents.Knowledge`.
+   and ingestion folders; reuse `AgenticWorkflow.Agents.Knowledge`.
 4. Tests with a fake `IChatClient`, including the v1 event protocol (section 2).
 5. Verify `GET /api/workflows` lists it and the UI dropdown shows it with zero frontend changes.
 

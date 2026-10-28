@@ -9,7 +9,7 @@ counter partition `system-guest-counter`, retention by user (1.3) and the guest 
 
 ### 1.1 Decision: one container, type discriminator
 
-Database `supportchat`, container `chat`, partition key `/userId` (value = `oid` claim).
+Database `agentwf`, container `chat`, partition key `/userId` (value = `oid` claim).
 Documents have `type` = `session` | `message` | `guest` | `guestCounter` (the last two: 1.8).
 
 Partition key values (ADR 0006 section 6): an Entra `oid` (lowercase GUID), a guest id `guest-<lowercase GUID v4>`
@@ -330,7 +330,7 @@ Global guest counters (reserved partition `userId = "system-guest-counter"`, `ty
 
 ## 2. Azure AI Search
 
-### 2.1 Index `support-knowledge` (`Search:IndexName`)
+### 2.1 Index `agentwf-knowledge` (`Search:IndexName`)
 
 One index for all domains; specialists filter by `domain`.
 

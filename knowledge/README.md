@@ -33,12 +33,12 @@ sourceUrl: https://example.com/kb/<domain>/<slug>
 
 ## How ingestion picks it up
 
-The console app in `src/backend/src/SupportChat.Ingestion` reads `Ingestion:SourcePath` (default `knowledge`, relative to
+The console app in `src/backend/src/AgenticWorkflow.Ingestion` reads `Ingestion:SourcePath` (default `knowledge`, relative to
 the working directory), chunks and embeds the files, and upserts them into the Azure AI Search index with deterministic
 ids; chunks of removed files are deleted. See `src/backend/README.md` (ingestion keys) and `infra/README.md` (Search
 service and roles). A local check that calls no Azure service:
 
 ```
-dotnet run --project src/backend/src/SupportChat.Ingestion -- --dry-run
+dotnet run --project src/backend/src/AgenticWorkflow.Ingestion -- --dry-run
 ```
 (Set `Ingestion__SourcePath` to the absolute path of this folder if you run from another directory.)

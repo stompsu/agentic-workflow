@@ -2,7 +2,7 @@
 param name string
 param location string
 param tags object
-param databaseName string = 'supportchat'
+param databaseName string = 'agentwf'
 param containerName string = 'chat'
 @description('Serverless (dev/test) or provisioned autoscale (prod).')
 param serverless bool

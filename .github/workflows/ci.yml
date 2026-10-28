@@ -101,13 +101,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: support-backend
+          - image: agentic-workflow-backend
             context: src/backend
             file: src/backend/Dockerfile
-          - image: support-frontend
+          - image: agentic-workflow-frontend
             context: src/frontend
             file: src/frontend/Dockerfile
-          - image: support-ingestion
+          - image: agentic-workflow-ingestion
             context: .
             file: src/backend/Dockerfile.ingestion
     steps:

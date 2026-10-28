@@ -32,10 +32,10 @@ jobs:
           az config set extension.use_dynamic_install=yes_without_prompt
           SUFFIX="v${TAG}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
           az containerapp update -n "$BACKEND_APP" -g "$RG" \
-            --image "$ACR.azurecr.io/support-backend:$TAG" \
+            --image "$ACR.azurecr.io/agentic-workflow-backend:$TAG" \
             --revision-suffix "$SUFFIX"
           az containerapp update -n "$FRONTEND_APP" -g "$RG" \
-            --image "$ACR.azurecr.io/support-frontend:$TAG" \
+            --image "$ACR.azurecr.io/agentic-workflow-frontend:$TAG" \
             --revision-suffix "$SUFFIX"
 
       - name: Smoke test (through the frontend proxy)

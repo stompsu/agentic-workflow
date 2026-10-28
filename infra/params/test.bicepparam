@@ -2,9 +2,9 @@ using '../main.bicep'
 
 // test references the shared ACR created by the dev deployment (same name; RG = dev resource group).
 param environmentName = 'test'
-param acrName = 'acrsupportchatshared'
+param acrName = 'acragentwfshared'
 param createAcr = false
-param acrResourceGroup = 'rg-supportchat-dev' // RG that holds the shared ACR; adjust to your naming
+param acrResourceGroup = 'rg-agentwf-dev' // RG that holds the shared ACR; adjust to your naming
 
 param echoWorkflowEnabled = false
 param entraInstance = 'https://REPLACE_ME.ciamlogin.com/'

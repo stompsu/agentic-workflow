@@ -14,7 +14,7 @@ Assumptions to verify against the repo before finishing:
 - Backend: `dotnet restore/build/test src/backend` works (single solution or project there), Dockerfile at src/backend/Dockerfile.
 - Frontend: package.json has scripts `lint`, `typecheck`, `test` (non-watch, e.g. vitest run), `build`; Dockerfile at src/frontend/Dockerfile.
 - Infra: infra/main.bicep and infra/params/{dev,test,prod}.bicepparam.
-- Image names: support-backend, support-frontend.
+- Image names: agentic-workflow-backend, agentic-workflow-frontend.
 
 GitHub Environment variables (not secrets), one set per environment: AZURE_CLIENT_ID, AZURE_TENANT_ID,
 AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, ACR_NAME, BACKEND_APP, FRONTEND_APP.

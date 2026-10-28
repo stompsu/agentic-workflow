@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
-# Build context: src/frontend.  Image name: support-frontend.
-#   docker build -t support-frontend src/frontend
-#   docker run -p 8080:8080 -e BACKEND_UPSTREAM=... -e AUTH_CLIENT_ID=... -e AUTH_AUTHORITY=... -e AUTH_API_SCOPE=... support-frontend
+# Build context: src/frontend.  Image name: agentic-workflow-frontend.
+#   docker build -t agentic-workflow-frontend src/frontend
+#   docker run -p 8080:8080 -e BACKEND_UPSTREAM=... -e AUTH_CLIENT_ID=... -e AUTH_AUTHORITY=... -e AUTH_API_SCOPE=... agentic-workflow-frontend
 # Nothing auth-related is baked at build: /config.json is written at container start.
 
 FROM node:24.22.1-alpine AS build

@@ -2,9 +2,9 @@ using '../main.bicep'
 
 // prod: managed identity only. No Cosmos/Search keys, no Key Vault secrets, local auth disabled.
 param environmentName = 'prod'
-param acrName = 'acrsupportchatshared'
+param acrName = 'acragentwfshared'
 param createAcr = false
-param acrResourceGroup = 'rg-supportchat-dev' // RG that holds the shared ACR; adjust to your naming
+param acrResourceGroup = 'rg-agentwf-dev' // RG that holds the shared ACR; adjust to your naming
 
 param echoWorkflowEnabled = false // startup fails if true in Production
 param entraInstance = 'https://REPLACE_ME.ciamlogin.com/'

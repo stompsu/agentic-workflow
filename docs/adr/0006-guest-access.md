@@ -171,19 +171,19 @@ ADR 0001 has a revision note pointing here (added 2026-10-27).
 | `localStorage` | same guest | same guest | kept | KEPT | Rejected: outlives the browser session the user asked for. |
 
 Recommendation B:
-- The guest token and its `expiresAt` live in `sessionStorage` under one key (`supportchat.guest`), so they survive
+- The guest token and its `expiresAt` live in `sessionStorage` under one key (`agentwf.guest`), so they survive
   reloads in the same tab.
 - Start-up order in `AuthContext`:
   1. MSAL has an account: social mode. Any guest token in this tab's `sessionStorage` is stale; remove it (no API call,
      no broadcast).
   2. Else this tab has a guest token with more than 60 s left: guest mode.
   3. Else: render the login page immediately (no blocking wait, so signed-in users and new visitors never wait) and
-     post `{type:"guest-token-request"}` on `BroadcastChannel("supportchat-guest")`. If a `guest-token` reply arrives
+     post `{type:"guest-token-request"}` on `BroadcastChannel("agentwf-guest")`. If a `guest-token` reply arrives
      within 300 ms, store it and switch to guest mode. Later replies are ignored.
 - A tab in guest mode answers a request only with its token if it has more than 60 s left (moot for most of the 4 h, but
   it avoids handing over a token that dies in the next request).
 - "End guest session", "Sign in" from guest mode, logout in either mode, the `expiresAt` timer and `guest_expired`
-  broadcast `{type:"guest-ended"}`. Every tab clears `supportchat.guest` and, if it was in guest mode, shows the login
+  broadcast `{type:"guest-ended"}`. Every tab clears `agentwf.guest` and, if it was in guest mode, shows the login
   page.
 - `BroadcastChannel` is same-origin only. It exposes nothing beyond what `sessionStorage` already exposes to scripts
   on our origin. XSS remains the main token-theft risk for every option. The existing CSP and the rendering rules
@@ -203,8 +203,8 @@ the vault URL). Claims:
 
 | Claim | Value |
 |---|---|
-| `iss` | `Guest:Issuer`, e.g. `supportchat-guest-dev` (a non-URL string; Entra issuers are always https URLs) |
-| `aud` | `Guest:Audience`, e.g. `supportchat-api-guest` (never an Entra audience, and the reverse) |
+| `iss` | `Guest:Issuer`, e.g. `agentwf-guest-dev` (a non-URL string; Entra issuers are always https URLs) |
+| `aud` | `Guest:Audience`, e.g. `agentwf-api-guest` (never an Entra audience, and the reverse) |
 | `sub`, `oid` | the guest user id `guest-<random GUID v4, lowercase>` (122 bits from a CSPRNG) |
 | `iat`, `nbf` | issue time |
 | `exp` | issue time + `Guest:MaxLifetime` (default 4 h) = end of the guest identity |
@@ -386,7 +386,7 @@ Vault sign, then Microsoft.IdentityModel validation) against the dev vault befor
 ### 6.2 `IGuestStore` (Core, new; Cosmos + InMemory implementations, review item 10)
 
 ```csharp
-namespace SupportChat.Core.Storage;
+namespace AgenticWorkflow.Core.Storage;
 public sealed record GuestRecord(string UserId, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt,
     int TurnCount, int MaxTurns, int SessionCount, int MaxSessions);
 public enum GuestCounter { CreationsPerHour, TurnsPerHour, TurnsPerDay }
@@ -732,8 +732,8 @@ with many IPs on its own, so the global caps are the cost ceiling.
 | `Guest:SigningMode` | `KeyVault` | `KeyVault` / `Ephemeral`; `Ephemeral` only in `Development` |
 | `Guest:SigningKeyUri` | - | versionless key URI; required when Enabled and mode `KeyVault` |
 | `Guest:SigningKeyRefreshInterval` | `01:00:00` | `00:05:00`..`01:00:00` (section 5.4) |
-| `Guest:Issuer` | - | required when Enabled; `^[a-z0-9-]{3,64}$`, e.g. `supportchat-guest-<env>` |
-| `Guest:Audience` | `supportchat-api-guest` | `^[a-z0-9-]{3,64}$`; must not be an Entra audience |
+| `Guest:Issuer` | - | required when Enabled; `^[a-z0-9-]{3,64}$`, e.g. `agentwf-guest-<env>` |
+| `Guest:Audience` | `agentwf-api-guest` | `^[a-z0-9-]{3,64}$`; must not be an Entra audience |
 | `Guest:MaxLifetime` | `04:00:00` | `00:30:00`..`12:00:00`; token `exp` = identity end |
 | `Guest:DataTtl` | `04:15:00` | `>= MaxLifetime + 00:05:00`, `<= 7.00:00:00`; range `00:35:00`..`7.00:00:00` checked even when guests are disabled |
 | `Guest:ActiveCheckCacheDuration` | `00:01:00` | `00:00:10`..`00:05:00` |

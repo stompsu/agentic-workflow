@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UserSecretsId>6a3b8d52-0f6e-4a58-9a0b-5d2c1d7e9b44</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../AgenticWorkflow.Core/AgenticWorkflow.Core.csproj" />
+    <ProjectReference Include="../AgenticWorkflow.Infrastructure/AgenticWorkflow.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AgenticWorkflow.Ingestion.Tests" />
+  </ItemGroup>
+</Project>

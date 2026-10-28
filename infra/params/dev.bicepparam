@@ -2,7 +2,7 @@ using '../main.bicep'
 
 // dev owns the shared ACR. Non-secret placeholders only; replace REPLACE_ME values (see infra/README.md).
 param environmentName = 'dev'
-param acrName = 'acrsupportchatshared' // must be globally unique: change before the first deploy
+param acrName = 'acragentwfshared' // must be globally unique: change before the first deploy
 param createAcr = true
 
 param echoWorkflowEnabled = true // Phase 1 walking skeleton (ADR 0003: allowed in Dev)

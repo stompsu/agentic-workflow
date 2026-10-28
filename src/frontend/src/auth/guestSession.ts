@@ -1,8 +1,8 @@
 import { ApiError, errorFromResponse } from '../api/errors';
 
 /** sessionStorage key for the guest token + expiry (ADR 0006 section 4). Never localStorage. */
-export const GUEST_STORAGE_KEY = 'supportchat.guest';
-export const GUEST_CHANNEL_NAME = 'supportchat-guest';
+export const GUEST_STORAGE_KEY = 'agentwf.guest';
+export const GUEST_CHANNEL_NAME = 'agentwf-guest';
 /** A token is only used at start-up or handed to another tab when it has more than this left. */
 export const MIN_REMAINING_MS = 60_000;
 /** How long a tab without a token waits for a hand-off reply from another tab. */
