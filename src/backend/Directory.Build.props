@@ -9,7 +9,5 @@
     <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <!-- Cosmos uses the System.Text.Json serializer (ADR 0003); skip the Newtonsoft explicit-reference check. -->
-    <AzureCosmosDisableNewtonsoftJsonCheck>true</AzureCosmosDisableNewtonsoftJsonCheck>
   </PropertyGroup>
 </Project>
