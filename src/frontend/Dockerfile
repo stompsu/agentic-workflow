@@ -4,7 +4,7 @@
 #   docker run -p 8080:8080 -e BACKEND_UPSTREAM=... -e AUTH_CLIENT_ID=... -e AUTH_AUTHORITY=... -e AUTH_API_SCOPE=... agentic-workflow-frontend
 # Nothing auth-related is baked at build: /config.json is written at container start.
 
-FROM node:24.22.1-alpine AS build
+FROM node:26.12.1-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
