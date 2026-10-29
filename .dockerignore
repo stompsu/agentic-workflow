@@ -1,15 +1,16 @@
 # Root build context for src/backend/Dockerfile.ingestion (docker build -f src/backend/Dockerfile.ingestion .).
-**/bin/
-**/obj/
-**/node_modules/
-**/.vs/
+# No trailing slashes: az acr build ignores rules ending in "/" (Docker treats both forms the same).
+**/bin
+**/obj
+**/node_modules
+**/.vs
 **/*.user
-.git/
-.github/
-.claude/
-src/frontend/
-src/backend/tests/
-infra/
-docs/
+.git
+.github
+.claude
+src/frontend
+src/backend/tests
+infra
+docs
 **/Dockerfile*
 **/.dockerignore

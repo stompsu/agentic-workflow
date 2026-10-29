@@ -1,8 +1,9 @@
-**/bin/
-**/obj/
-**/.vs/
+# No trailing slashes: az acr build ignores rules ending in "/" (Docker treats both forms the same).
+**/bin
+**/obj
+**/.vs
 **/*.user
-tests/
+tests
 Dockerfile
 .dockerignore
 README.md
