@@ -35,6 +35,8 @@ param frontendMaxReplicas int = 3
 param frontendConcurrentRequests int = 50
 param cosmosAutoscaleMaxThroughput int = 4000
 param searchSku string = 'basic'
+@description('Region for AI Search only (e.g. when the RG region has no capacity for the SKU). Default = location.')
+param searchLocation string = location
 
 // ---- app configuration (non-secret; docs/plan.md section 5) --------------------------------------------------------
 // Required (no defaults). Placeholders are rejected by scripts/check-params.sh (Bicep assert is experimental).
@@ -218,7 +220,7 @@ module search 'modules/search.bicep' = {
   name: 'search'
   params: {
     name: toLower('srch-${base}-${uniq}')
-    location: location
+    location: searchLocation
     tags: tags
     sku: searchSku
     disableLocalAuth: isProd

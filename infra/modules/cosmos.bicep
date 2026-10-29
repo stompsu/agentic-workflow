@@ -54,7 +54,6 @@ resource container 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/container
         automatic: true
         includedPaths: [
           { path: '/userId/?' }
-          { path: '/id/?' }
           { path: '/type/?' }
           { path: '/sessionId/?' }
           { path: '/state/?' }

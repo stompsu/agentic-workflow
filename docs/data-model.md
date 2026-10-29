@@ -181,7 +181,7 @@ session length on every turn), and a scheduled cleanup job (extra component; TTL
   "indexingMode": "consistent",
   "automatic": true,
   "includedPaths": [
-    { "path": "/userId/?" }, { "path": "/id/?" }, { "path": "/type/?" }, { "path": "/sessionId/?" }, { "path": "/state/?" },
+    { "path": "/userId/?" }, { "path": "/type/?" }, { "path": "/sessionId/?" }, { "path": "/state/?" },
     { "path": "/status/?" }, { "path": "/createdAt/?" }, { "path": "/updatedAt/?" }
   ],
   "excludedPaths": [ { "path": "/*" } ],
