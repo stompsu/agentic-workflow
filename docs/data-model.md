@@ -336,7 +336,7 @@ One index for all domains; specialists filter by `domain`.
 
 | Field | Type | key | searchable | filterable | facetable | sortable | retrievable | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `id` | `Edm.String` | yes | no | yes | no | no | yes | Chunk id: base64url(SHA-256(sourcePath + "#" + chunkIndex)), deterministic so re-ingestion upserts |
+| `id` | `Edm.String` | yes | no | yes | no | no | yes | Chunk id: lowercase hex(SHA-256(sourcePath + "#" + chunkIndex)), deterministic so re-ingestion upserts. Not base64url: a Search document key cannot start with `_` |
 | `domain` | `Edm.String` | | no | yes | yes | no | yes | Open set of lowercase values (`^[a-z0-9-]+$`); current values in 2.5 |
 | `title` | `Edm.String` | | yes (`en.microsoft`) | no | no | no | yes | Document title (+ section heading) |
 | `content` | `Edm.String` | | yes (`en.microsoft`) | no | no | no | yes | Chunk text, ~500-800 tokens, ~10% overlap |

@@ -84,21 +84,21 @@ public class ChunkingTests
 public class ChunkIdTests
 {
     [Fact]
-    public void Id_is_base64url_sha256_of_path_hash_index()
+    public void Id_is_lowercase_hex_sha256_of_path_hash_index()
     {
-        var expected = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData("claims/a.md#3"u8))
-            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var expected = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData("claims/a.md#3"u8));
         Assert.Equal(expected, ChunkIds.For("claims/a.md", 3));
-        Assert.Equal(43, expected.Length);
+        Assert.Equal(64, expected.Length);
     }
 
     [Fact]
-    public void Ids_are_stable_unique_and_url_safe()
+    public void Ids_are_stable_unique_and_valid_search_keys()
     {
         var ids = Enumerable.Range(0, 500).Select(i => ChunkIds.For($"policy/doc{i % 7}.md", i)).ToList();
         Assert.Equal(ids, Enumerable.Range(0, 500).Select(i => ChunkIds.For($"policy/doc{i % 7}.md", i)));
         Assert.Equal(ids.Count, ids.Distinct().Count());
-        Assert.All(ids, id => Assert.Matches("^[A-Za-z0-9_-]+$", id));
+        // Search document keys: letters, digits, '-', '_', '=', and the first character cannot be '_'.
+        Assert.All(ids, id => Assert.Matches("^[A-Za-z0-9=-][A-Za-z0-9_=-]*$", id));
         Assert.NotEqual(ChunkIds.For("a.md", 0), ChunkIds.For("a.md", 1));
         Assert.NotEqual(ChunkIds.For("a.md", 1), ChunkIds.For("b.md", 1));
     }
