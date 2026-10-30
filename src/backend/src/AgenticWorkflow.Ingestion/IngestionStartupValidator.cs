@@ -37,7 +37,7 @@ public static class IngestionStartupValidator
             failures.Add("Ingestion:SearchAdminKey must not be set when Azure:AuthMode=ManagedIdentity.");
         }
 
-        foreach (var key in new[] { "Search:Endpoint", "Foundry:ProjectEndpoint", "Ingestion:VectorizerResourceUri" })
+        foreach (var key in new[] { "Search:Endpoint", "Ingestion:VectorizerResourceUri" })
         {
             if (!Uri.TryCreate(configuration[key], UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps
                 || (configuration[key]?.Contains('<') ?? true))

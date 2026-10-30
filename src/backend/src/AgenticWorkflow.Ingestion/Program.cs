@@ -7,8 +7,8 @@ using AgenticWorkflow.Infrastructure.Azure;
 using AgenticWorkflow.Ingestion;
 
 // Usage: dotnet run --project src/AgenticWorkflow.Ingestion -- [--dry-run] [--allow-empty]
-// Configuration: appsettings.json / user-secrets / env (Ingestion__*, Search__Endpoint, Search__IndexName, Azure__AuthMode,
-// Foundry__ProjectEndpoint). Nothing here talks to Azure with --dry-run.
+// Configuration: appsettings.json / user-secrets / env (Ingestion__*, Search__Endpoint, Search__IndexName, Azure__AuthMode).
+// Nothing here talks to Azure with --dry-run.
 var builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.AddUserSecrets<IngestionOptions>(optional: true);
 using var host = builder.Build();
@@ -43,7 +43,7 @@ var credentialProvider = new AzureCredentialProvider(environment, configuration)
 var clients = new IngestionClients(
     mode, new Uri(configuration["Search:Endpoint"]!), indexName, options.SearchAdminKey, () => credentialProvider.Credential);
 var embeddings = IngestionClients.CreateEmbeddingGenerator(
-    new Uri(configuration["Foundry:ProjectEndpoint"]!), options.EmbeddingDeployment!, credentialProvider.Credential);
+    new Uri(options.VectorizerResourceUri!), options.EmbeddingDeployment!, credentialProvider.Credential);
 
 await new IngestionRunner(options, indexName, clients, embeddings, log).RunAsync(false, allowEmpty, CancellationToken.None);
 return 0;

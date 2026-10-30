@@ -20,6 +20,20 @@ public class IngestionStartupValidatorTests
         return IngestionStartupValidator.Validate(configuration, env, options, out _);
     }
 
+    [Fact]
+    public void Foundry_project_endpoint_is_not_required()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Azure:AuthMode"] = "ManagedIdentity",
+            ["Search:Endpoint"] = "https://search.example.net",
+            ["Ingestion:VectorizerResourceUri"] = "https://foundry.example.net",
+        }).Build();
+        var options = new IngestionOptions { EmbeddingDeployment = "embed" };
+
+        Assert.Empty(IngestionStartupValidator.Validate(configuration, "Production", options, out _));
+    }
+
     [Theory]
     [InlineData("<embedding-deployment>")]
     [InlineData("REPLACE_ME")]

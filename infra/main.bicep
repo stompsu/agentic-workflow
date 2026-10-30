@@ -263,7 +263,7 @@ module modelRole 'modules/role-model-account.bicep' = if (!empty(modelResourceId
   }
 }
 
-// Ingestion identity -> Foundry project (embeddings via AIProjectClient) and model account.
+// Ingestion identity -> Foundry project and model account (embeddings use the model account endpoint, plan.md D8).
 module foundryRoleIngestion 'modules/role-foundry-project.bicep' = if (ingestionEnabled && !empty(foundryProjectResourceId)) {
   name: 'role-foundry-ingestion'
   scope: resourceGroup(empty(foundryProjectResourceId) ? subscription().subscriptionId : foundryParts[2], empty(foundryProjectResourceId) ? resourceGroup().name : foundryParts[4])

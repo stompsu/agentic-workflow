@@ -1,13 +1,14 @@
 // OpenAI embedding/responses client surfaces are marked experimental in the pinned prerelease.
 #pragma warning disable OPENAI001
+using System.ClientModel.Primitives;
 using Azure;
-using Azure.AI.Projects;
 using Azure.Core;
 using Azure.Core.Pipeline;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Microsoft.Extensions.AI;
 using OpenAI;
+using OpenAI.Embeddings;
 using AgenticWorkflow.Core.Options;
 
 namespace AgenticWorkflow.Ingestion;
@@ -35,10 +36,20 @@ public sealed class IngestionClients(
     private string RequireKey() =>
         string.IsNullOrWhiteSpace(adminKey) ? throw new InvalidOperationException("Ingestion:SearchAdminKey is not configured.") : adminKey;
 
-    /// <summary>Models are always reached with a TokenCredential (no model keys).</summary>
-    public static IEmbeddingGenerator<string, Embedding<float>> CreateEmbeddingGenerator(Uri projectEndpoint, string deployment, TokenCredential credential) =>
-        new AIProjectClient(projectEndpoint, credential)
-            .GetProjectOpenAIClient()
-            .GetEmbeddingClient(deployment)
-            .AsIEmbeddingGenerator();
+    /// <summary>
+    /// Models are always reached with a TokenCredential (no model keys). Embeddings use the resource's <c>/openai/v1</c>
+    /// endpoint, not AIProjectClient: the project endpoint does not route embedding requests (404, plan.md D8).
+    /// </summary>
+    public static IEmbeddingGenerator<string, Embedding<float>> CreateEmbeddingGenerator(
+        Uri modelResourceUri, string deployment, TokenCredential credential, PipelineTransport? transport = null)
+    {
+        var options = new OpenAIClientOptions { Endpoint = new Uri(new Uri(modelResourceUri.AbsoluteUri.TrimEnd('/') + "/"), "openai/v1/") };
+        if (transport is not null)
+        {
+            options.Transport = transport;
+        }
+
+        var tokenPolicy = new BearerTokenPolicy(credential, "https://ai.azure.com/.default");
+        return new EmbeddingClient(deployment, tokenPolicy, options).AsIEmbeddingGenerator();
+    }
 }

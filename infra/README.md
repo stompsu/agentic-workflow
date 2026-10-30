@@ -149,7 +149,8 @@ The API identity never gets Contributor roles on Search or the admin key. Env pa
 `DOTNET_ENVIRONMENT`, `AZURE_CLIENT_ID` (ingestion identity), `AZURE_TOKEN_CREDENTIALS`, `Azure__AuthMode`, `Search__Endpoint`,
 `Search__IndexName`, `Ingestion__SourcePath`, `Ingestion__EmbeddingDeployment`, `Ingestion__VectorizerDeployment`,
 `Ingestion__VectorizerResourceUri` (from `vectorizerResourceUri` or `https://<model account>.openai.azure.com`),
-`Foundry__ProjectEndpoint`, and (dev/test) `Ingestion__SearchAdminKey` (secretRef). The app fails fast when the endpoint or
+`Foundry__ProjectEndpoint` (not read by ingestion), and (dev/test) `Ingestion__SearchAdminKey` (secretRef). Embeddings are
+called on `Ingestion__VectorizerResourceUri` + `/openai/v1` (plan.md D8). The app fails fast when the Search endpoint or
 vectorizer uri are missing, so set those params first.
 
 Start manually (after the image is pushed): `az containerapp job start -g <rg> -n <ingestionJobName>`; follow with

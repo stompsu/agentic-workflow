@@ -438,6 +438,10 @@ D8. Embeddings: text-embedding-3-small at 1536 dimensions. The orchestrator runs
     `Ingestion:EmbeddingDeployment`). User inputs (per environment): Foundry project resource id
     (`foundryProjectResourceId`), project endpoint (`foundryProjectEndpoint`), model resource id (`modelResourceId`),
     and the deployment names. The Foundry project and model deployments are referenced, never created.
+    Exception to "models via AIProjectClient": ingestion embeddings call the resource endpoint
+    (`Ingestion:VectorizerResourceUri` + `/openai/v1`) with the OpenAI SDK and a TokenCredential, no keys. The project
+    endpoint does not route embedding requests (404, Microsoft Learn "Foundry SDKs and endpoints"; confirmed against dev
+    on 2026-10-30). Chat stays on AIProjectClient.
 D9. Knowledge source for v1: the repo folder `knowledge/{policy,claims,health}/`; English content, analyzer
     `en.microsoft`. (data-model 2.1, 2.6)
 D10. No custom domain for now; the frontend uses the Container App FQDN and auth stays on `<sub>.ciamlogin.com`.

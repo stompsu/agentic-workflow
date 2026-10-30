@@ -20,7 +20,7 @@ public sealed class IngestionOptions
     /// <summary>Key mode only (Development/Dev/Test), secret. Production uses Managed Identity / RBAC.</summary>
     public string? SearchAdminKey { get; set; }
 
-    /// <summary>Resource of the Azure OpenAI / Foundry model used by the index's integrated vectorizer.</summary>
+    /// <summary>Resource hosting the embedding deployment: used for ingestion embeddings and the index's integrated vectorizer.</summary>
     public string? VectorizerResourceUri { get; set; }
 
     /// <summary>Defaults to <see cref="EmbeddingDeployment"/>.</summary>
