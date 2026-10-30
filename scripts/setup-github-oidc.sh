@@ -75,6 +75,24 @@ else
 fi
 ACR_ID=$(capture "<acr-resource-id>" az acr show -n "$ACR" -g "$ACR_RG" --query id -o tsv)
 
+# OIDC subject prefix as GitHub presents it. Repos with immutable subjects send "repo:OWNER@ID/REPO@ID", others
+# "repo:OWNER/REPO" (https://docs.github.com/en/rest/actions/oidc). Read-only GET, also in dry-run.
+SUB_PREFIX="repo:$ORG/$REPO"
+OIDC_SUB_API="repos/$ORG/$REPO/actions/oidc/customization/sub"
+if USE_DEFAULT=$(gh api "$OIDC_SUB_API" --jq '.use_default' 2>/dev/null); then
+  if [ "$USE_DEFAULT" != "true" ]; then
+    echo "Repo uses custom OIDC claim keys: this script supports the default subject format only (gh api $OIDC_SUB_API)." >&2
+    exit 1
+  fi
+  SUB_PREFIX=$(gh api "$OIDC_SUB_API" --jq ".sub_claim_prefix // \"$SUB_PREFIX\"")
+elif $APPLY; then
+  echo "Cannot read $OIDC_SUB_API (gh auth login, repo admin)" >&2
+  exit 1
+else
+  echo "# (dry-run: could not read the OIDC subject prefix from GitHub; assuming $SUB_PREFIX)"
+fi
+echo "# OIDC subject prefix: $SUB_PREFIX"
+
 for ENV in $ENVS; do
   RG="$(rg_for "$ENV")"
   ID_NAME="id-github-$ENV"
@@ -106,18 +124,27 @@ for ENV in $ENVS; do
     echo "# MANUAL (portal): Settings > Environments > $ENV > Required reviewers."
   fi
 
-  echo "# 2. User-assigned managed identity + federated credential (subject: environment:$ENV)"
+  echo "# 2. User-assigned managed identity + federated credential (subject: $SUB_PREFIX:environment:$ENV)"
   if $APPLY && az identity show -g "$RG" -n "$ID_NAME" >/dev/null 2>&1; then
     echo "# identity $ID_NAME exists, skipping create"
   else
     run az identity create -g "$RG" -n "$ID_NAME"
   fi
-  if $APPLY && az identity federated-credential show --identity-name "$ID_NAME" -g "$RG" --name "github-$ENV" >/dev/null 2>&1; then
-    echo "# federated credential github-$ENV exists, skipping create"
+  SUBJECT="$SUB_PREFIX:environment:$ENV"
+  EXISTING_SUBJECT=""
+  if $APPLY; then
+    EXISTING_SUBJECT=$(az identity federated-credential show --identity-name "$ID_NAME" -g "$RG" --name "github-$ENV" \
+      --query subject -o tsv 2>/dev/null || true)
+  fi
+  if [ "$EXISTING_SUBJECT" = "$SUBJECT" ]; then
+    echo "# federated credential github-$ENV exists with subject $SUBJECT, skipping"
   else
-    run az identity federated-credential create --name "github-$ENV" --identity-name "$ID_NAME" -g "$RG" \
+    # Create, or fix the subject of an existing credential (e.g. after the repo switched to immutable subjects).
+    [ -n "$EXISTING_SUBJECT" ] && verb=update || verb=create
+    [ -n "$EXISTING_SUBJECT" ] && echo "# federated credential github-$ENV has subject $EXISTING_SUBJECT: updating"
+    run az identity federated-credential "$verb" --name "github-$ENV" --identity-name "$ID_NAME" -g "$RG" \
       --issuer https://token.actions.githubusercontent.com \
-      --subject "repo:$ORG/$REPO:environment:$ENV" \
+      --subject "$SUBJECT" \
       --audiences api://AzureADTokenExchange
   fi
   CLIENT_ID=$(capture "<client-id-of-$ID_NAME>" az identity show -g "$RG" -n "$ID_NAME" --query clientId -o tsv)

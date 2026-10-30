@@ -20,7 +20,7 @@ are no long-lived Azure secrets in GitHub. Everything stored in GitHub is a non-
 |---|---|
 | GitHub Environment | `dev`, `test`, `prod` |
 | User-assigned managed identity (pipeline identity, NOT the app identity) | `id-github-<env>` in the environment RG |
-| Federated credential | name `github-<env>`; issuer `https://token.actions.githubusercontent.com`; audience `api://AzureADTokenExchange`; subject `repo:<org>/<repo>:environment:<env>` |
+| Federated credential | name `github-<env>`; issuer `https://token.actions.githubusercontent.com`; audience `api://AzureADTokenExchange`; subject `<prefix>:environment:<env>`, where `<prefix>` is the repo's `sub_claim_prefix` (see below) |
 | Roles | `Contributor` on the environment RG; `AcrPush` on the shared ACR for the **dev** identity only |
 | Variables | see section 4 |
 
@@ -59,13 +59,22 @@ scripts/setup-github-oidc.sh --org <org> --repo <repo> --acr <acr-name> --acr-rg
 scripts/setup-github-oidc.sh ... --apply
 ```
 
-Add `--infra-roles` only if the infra workflow should deploy (section 5). The underlying commands, per environment:
+Add `--infra-roles` only if the infra workflow should deploy (section 5).
+
+**Subject prefix.** GitHub repos can present an immutable OIDC subject that contains the owner and repo ids,
+`repo:<org>@<org-id>/<repo>@<repo-id>`, instead of `repo:<org>/<repo>`. The federated credential must match exactly.
+Read the prefix (read-only) with
+`gh api repos/$ORG/$REPO/actions/oidc/customization/sub --jq .sub_claim_prefix`
+(empty/null = `repo:$ORG/$REPO`). The script does this itself and also corrects the subject of an existing
+`github-<env>` credential. It stops if the repo uses custom claim keys (`use_default: false`).
+
+The underlying commands, per environment:
 
 ```bash
 az identity create -g $RG -n id-github-$ENV                                       # run by the user
 az identity federated-credential create --name github-$ENV --identity-name id-github-$ENV -g $RG \
   --issuer https://token.actions.githubusercontent.com \
-  --subject repo:$ORG/$REPO:environment:$ENV --audiences api://AzureADTokenExchange   # run by the user
+  --subject $SUB_PREFIX:environment:$ENV --audiences api://AzureADTokenExchange       # run by the user
 az role assignment create --assignee-object-id $PRINCIPAL_ID --assignee-principal-type ServicePrincipal \
   --role Contributor --scope $RG_ID                                                # run by the user
 az role assignment create --assignee-object-id $DEV_PRINCIPAL_ID --assignee-principal-type ServicePrincipal \
@@ -145,8 +154,11 @@ First-time order: infra dev (from your machine) -> setup script -> set app/job v
 
 ## 7. Troubleshooting
 
-- `AADSTS700213` / no matching federated identity record: the subject must be exactly
-  `repo:<org>/<repo>:environment:<env>` (case-sensitive org/repo) and the job must declare `environment:`.
+- `AADSTS700213` / no matching federated identity record: the credential subject must equal the subject in the error
+  message exactly, e.g. `repo:<org>@<org-id>/<repo>@<repo-id>:environment:<env>` for immutable subjects or
+  `repo:<org>/<repo>:environment:<env>` otherwise (section 3, subject prefix), and the job must declare
+  `environment:`. Fix: rerun the setup script with `--apply` (it updates the subject) or
+  `az identity federated-credential update ... --subject <subject from the error>`.
 - Deploy job waits forever: pending approval in the environment.
 - "Branch not allowed to deploy": the run is not on `main`.
 - Role assignment errors right after creating the identity: propagation, retry after a minute.
