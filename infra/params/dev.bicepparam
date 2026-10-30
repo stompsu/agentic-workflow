@@ -23,7 +23,7 @@ param writeSearchQueryKeyFromBicep = true
 // Ingestion job (manual trigger). Needs foundryProjectEndpoint, modelResourceId (or vectorizerResourceUri) and an
 // image built from Dockerfile.ingestion (knowledge/ at /app/knowledge). Pass ingestionImage from the pipeline.
 param deployIngestionJob = false
-param embeddingDeployment = 'text-embedding-3-small'
+param embeddingDeployment = 'embedding' // deployment name in agentwf-resource (model text-embedding-3-small)
 param modelResourceId = '/subscriptions/47a28b0b-6638-4e6a-a788-c283b705b008/resourceGroups/rg-agentwf-ai/providers/Microsoft.CognitiveServices/accounts/agentwf-resource' // Foundry/Azure OpenAI account that hosts the embedding deployment
 
 // Retention (D7): user-changeable default, 1..3650 days.
