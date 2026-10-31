@@ -49,6 +49,8 @@ param spaAuthority string
 param apiScope string
 param searchIndexName string = 'agentwf-knowledge'
 param echoWorkflowEnabled bool = false
+@description('Non-production only: record LLM prompts, instructions and responses in Application Insights (plan.md D14). Rejected in prod.')
+param llmContentTelemetryEnabled bool = false
 
 // ---- retention, sign-in options, workflow models (plan.md section 3 Phase 5; D6, D7, D8) ---------------------------
 @description('Chat retention in days (D7): backend Chat__RetentionDays, frontend APP_RETENTION_DAYS. User-changeable defaults: dev 30, test 30, prod 90.')
@@ -124,6 +126,8 @@ var aspNetEnvironment = environmentName == 'dev' ? 'Dev' : (isTest ? 'Test' : 'P
 var ingestionEnabled = deployIngestionJob && !empty(ingestionImage)
 // Prod guard: guests in prod need the ADR 0006 preconditions acknowledged (fail() aborts template evaluation).
 var guestOn = (isProd && guestAccessEnabled && !guestProdPreconditionsAck) ? fail('guestAccessEnabled=true in prod requires guestProdPreconditionsAck=true (G7 CAPTCHA + prod Key Vault Crypto User role, ADR 0006).') : guestAccessEnabled
+// Prod guard: LLM content telemetry holds prompts and user text (plan.md D14).
+var llmContentOn = (isProd && llmContentTelemetryEnabled) ? fail('llmContentTelemetryEnabled=true is not allowed in prod (plan.md D14).') : llmContentTelemetryEnabled
 var guestKeyName = 'guest-token-signing'
 var guestLifetime = '${padLeft(string(guestMaxLifetimeHours), 2, '0')}:00:00'
 var guestTtlDays = guestDataTtlMinutes / 1440
@@ -304,6 +308,7 @@ var baseEnv = [
   { name: 'Search__Endpoint', value: search.outputs.endpoint }
   { name: 'Search__IndexName', value: searchIndexName }
   { name: 'Workflows__Echo__Enabled', value: echoWorkflowEnabled ? 'true' : 'false' }
+  { name: 'Telemetry__LlmContentEnabled', value: llmContentOn ? 'true' : 'false' }
   { name: 'Chat__RetentionDays', value: string(chatRetentionDays) }
   { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'appinsights-connection' }
 ]

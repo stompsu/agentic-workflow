@@ -23,6 +23,9 @@
     <PackageVersion Include="Azure.Identity" Version="[1.21.0]" />
     <!-- Guest token signing (ADR 0006): KeyClient/CryptographyClient with the app TokenCredential only. Latest stable on NuGet 2026-10-27. -->
     <PackageVersion Include="Azure.Security.KeyVault.Keys" Version="[4.10.2]" />
+    <!-- LLM content telemetry (plan.md D14). Latest stable on NuGet 2026-10-31. -->
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="[1.20.1]" />
+    <PackageVersion Include="Azure.Monitor.OpenTelemetry.Exporter" Version="[1.10.0]" />
     <!-- Tests -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="xunit" Version="2.9.3" />

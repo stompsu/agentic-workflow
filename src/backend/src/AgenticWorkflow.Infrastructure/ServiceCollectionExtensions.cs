@@ -15,6 +15,7 @@ using AgenticWorkflow.Infrastructure.Health;
 using AgenticWorkflow.Infrastructure.Models;
 using AgenticWorkflow.Infrastructure.Search;
 using AgenticWorkflow.Infrastructure.Smoke;
+using AgenticWorkflow.Infrastructure.Telemetry;
 using AgenticWorkflow.Infrastructure.Storage;
 using AgenticWorkflow.Infrastructure.Storage.Cosmos;
 
@@ -39,6 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddOptions<FoundryOptions>().Bind(configuration.GetSection(FoundryOptions.SectionName));
         services.AddOptions<AuthOptions>().Bind(configuration.GetSection(AuthOptions.SectionName));
         services.AddOptions<ChatLimitsOptions>().Bind(configuration.GetSection(ChatLimitsOptions.SectionName));
+        services.AddOptions<TelemetryOptions>().Bind(configuration.GetSection(TelemetryOptions.SectionName));
 
         services.AddSingleton<IAzureCredentialProvider, AzureCredentialProvider>();
         services.AddSingleton<IAzureClientFactory, AzureClientFactory>();
@@ -59,6 +61,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ILogger<AzureSearchKnowledgeSearch>>()));
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
         services.AddSmokeChecks();
+        services.AddLlmContentTelemetry(configuration);
         return services;
     }
 }

@@ -708,6 +708,9 @@ with many IPs on its own, so the global caps are the cost ceiling.
 
 ## 10. Logging and privacy
 
+Except for LLM content telemetry in non-production environments (plan.md D14), which can hold guest message text for
+the workspace retention, longer than `Guest:DataTtl`, and is not removed by `DELETE /api/me/data`.
+
 - Never logged: tokens (guest or Entra), `botCheckToken`, raw IP addresses, `X-Client-Ip`, `X-Forwarded-For`. Rate-limit
   rejections log only the limiter name and the partition kind ("client", "global-create", "global-turn-hour",
   "global-turn-day", "guest").

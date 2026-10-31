@@ -42,6 +42,41 @@ public class AzureStartupValidatorTests
         Assert.Empty(Run(config, "Dev"));
     }
 
+    // plan.md D14
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Dev")]
+    [InlineData("Test")]
+    public void Llm_content_telemetry_is_allowed_outside_production(string env)
+    {
+        var config = TestConfig.Development();
+        config["AZURE_CLIENT_ID"] = "id";
+        config["Telemetry:LlmContentEnabled"] = "true";
+        config["APPLICATIONINSIGHTS_CONNECTION_STRING"] = "InstrumentationKey=00000000-0000-0000-0000-000000000000";
+        Assert.Empty(Run(config, env));
+    }
+
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("production")]
+    [InlineData("Staging")]
+    public void Llm_content_telemetry_fails_startup_elsewhere(string env)
+    {
+        var config = TestConfig.Production();
+        config["Telemetry:LlmContentEnabled"] = "true";
+        config["APPLICATIONINSIGHTS_CONNECTION_STRING"] = "InstrumentationKey=00000000-0000-0000-0000-000000000000";
+        Assert.Contains("Telemetry:LlmContentEnabled=true is allowed only in Development, Dev and Test.", Run(config, env));
+    }
+
+    [Fact]
+    public void Llm_content_telemetry_requires_a_connection_string()
+    {
+        var config = TestConfig.Development();
+        config["AZURE_CLIENT_ID"] = "id";
+        config["Telemetry:LlmContentEnabled"] = "true";
+        Assert.Contains("APPLICATIONINSIGHTS_CONNECTION_STRING is required when Telemetry:LlmContentEnabled=true.", Run(config, "Dev"));
+    }
+
     // Rule 1
     [Theory]
     [InlineData(null)]

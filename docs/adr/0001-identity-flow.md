@@ -106,7 +106,8 @@ environment) and `prod`. Authority host stays `<sub>.ciamlogin.com` in every env
 - Rejected: reading `sub` (pairwise per app, would change if the SPA registration changes), email (mutable, may be
   missing for Facebook), or any client-provided id.
 - Logging: `oid` may appear in structured logs/traces as `enduser.id`; tokens, emails, names and message content are
-  never logged (enforced from Phase 1).
+  never logged (enforced from Phase 1). Single exception: `Telemetry:LlmContentEnabled` in non-production
+  environments (plan.md D14). Startup fails if it is on in Production.
 - Data deletion (D7, ADR 0004): users delete their own chat data with `DELETE /api/me/data`, a delete of everything
   in their `oid` partition; retention TTL removes the rest. Deleting the Entra user object (the account) is a separate
   manual admin step (auth-setup section 9); it does not touch Cosmos, and a later sign-in creates a new `oid`.

@@ -7,6 +7,7 @@ param createAcr = true
 // westeurope had no Search Basic capacity on 2026-10-29 (ResourcesForSkuUnavailable).
 param searchLocation = 'northeurope'
 
+param llmContentTelemetryEnabled = true // records prompts and user text in Application Insights (plan.md D14)
 param echoWorkflowEnabled = true // Phase 1 walking skeleton (ADR 0003: allowed in Dev)
 param entraInstance = 'https://agentwfdev.ciamlogin.com/'
 param entraTenantId = '625c8458-1b7d-48c2-886d-1818a1dffd98'

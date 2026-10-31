@@ -182,7 +182,7 @@ The phase split below follows the user's fixed brief (2026-10-25); task content 
   Minimal registry: a Core-level `IWorkflowRegistry` implementation in Api or Agents that only lists registered
   definitions, so `GET /api/workflows` and `POST /api/sessions` workflowId validation work. It may be empty; the final
   `WorkflowRegistry` / `AddWorkflow<T>` replaces it in Phase 2 without endpoint changes.
-  Rule from Phase 1: no message content, prompts, tokens or emails in logs.
+  Rule from Phase 1: no message content, prompts, tokens or emails in logs (non-production exception: D14).
   Tests: fake JWT handler; 404 for foreign session identical except `traceId`; in-memory store enforcing `userId` +
   Cosmos emulator isolation tests (skipped when the emulator is absent: user B cannot read/list/delete/lock user A
   data); store-level `LeaseLost` writes nothing; throwaway workflow registered in Api.Tests proving extensibility
@@ -452,6 +452,15 @@ D11. Infra (Bicep) is deployed from the user's machine in v1; the OIDC setup scr
     pipelines deploy images only. (cicd-setup.md section 5)
 D12. The frontend bundle is not code-split in v1 (single chunk; a Vite chunk-size warning is accepted).
 D13. Playwright browsers may be installed locally (`npx playwright install chromium`) for `npm run e2e`.
+D14. LLM content telemetry. `Telemetry:LlmContentEnabled` (Bicep `llmContentTelemetryEnabled`, default false, true in dev)
+    records every model call: system instructions, input messages (user text, history, retrieved knowledge), tool
+    definitions and output messages. Off = no OpenTelemetry at all. Startup fails if it is on in Production or without
+    `APPLICATIONINSIGHTS_CONNECTION_STRING`; Bicep refuses it in prod. Only this data is exported: no request traces and no
+    application logs. Spans are written with GenAI attributes; because Application Insights cuts a property at 8,192
+    characters, the content is also written as log records (`traces`, category `AgenticWorkflow.LlmContent`) in parts of
+    at most 8,000 characters. Records carry no user id, but the text can hold personal data: it stays for the workspace
+    retention (30 days), which outlives `Guest:DataTtl`, and `DELETE /api/me/data` does not remove it. Embedding input
+    (ingestion) and the Search vectorizer are not covered.
 
 Policy consequence recorded (qa finding 1): keys stay allowed in Test per CLAUDE.md, and a pre-prod MI smoke job in
 test gates prod (ADR 0003 section 1a).

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using AgenticWorkflow.Core.Options;
 using AgenticWorkflow.Core.Workflows;
+using AgenticWorkflow.Infrastructure.Telemetry;
 
 namespace AgenticWorkflow.Infrastructure.Azure;
 
@@ -119,6 +120,20 @@ public static class AzureStartupValidator
         if (echoEnabled && !keyAllowedEnvironment)
         {
             failures.Add("Workflows:Echo:Enabled=true is allowed only in Development, Dev and Test.");
+        }
+
+        // plan.md D14: LLM content telemetry holds prompts and user text, so it never runs in Production.
+        if (configuration.GetValue("Telemetry:LlmContentEnabled", false))
+        {
+            if (!keyAllowedEnvironment)
+            {
+                failures.Add("Telemetry:LlmContentEnabled=true is allowed only in Development, Dev and Test.");
+            }
+
+            if (string.IsNullOrWhiteSpace(configuration[LlmContentTelemetry.ConnectionStringKey]))
+            {
+                failures.Add($"{LlmContentTelemetry.ConnectionStringKey} is required when Telemetry:LlmContentEnabled=true.");
+            }
         }
 
         // Rule 9 (D7): retention is required outside Development; when set it must be an integer in 1..3650.

@@ -95,3 +95,11 @@ public sealed class EchoWorkflowOptions
 
     public bool Enabled { get; set; }
 }
+
+public sealed class TelemetryOptions
+{
+    public const string SectionName = "Telemetry";
+
+    /// <summary>Non-production only: records LLM prompts, instructions and responses (plan.md D14).</summary>
+    public bool LlmContentEnabled { get; set; }
+}

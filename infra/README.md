@@ -97,6 +97,7 @@ The Cosmos container keeps `defaultTtl -1` (TTL on, no default expiry); the app 
 ## User-supplied inputs per environment
 
 Set in `params/<env>.bicepparam` (or `--parameters`); nothing here is a secret.
+- `llmContentTelemetryEnabled` (default false, true in dev, rejected in prod): records LLM prompts, instructions and responses (plan.md D14).
 - Entra: `entraInstance`, `entraTenantId`, `apiClientId`, `spaClientId`, `spaAuthority`, `apiScope` (`docs/auth-setup.md`).
 - Foundry (D8): `foundryProjectResourceId`, `foundryProjectEndpoint`, `modelResourceId`, `embeddingDeployment`
   (the `text-embedding-3-small` deployment name), `orchestratorDeployment` and `specialistDeployment` (chat deployment names).
@@ -185,3 +186,20 @@ GitHub OIDC identity, NOT `managedIdentityClientId` (that is the app identity).
 - Entra External ID tenant, app registrations, Google/Facebook federation, redirect URIs: `docs/auth-setup.md`.
 - Foundry project and model deployments (referenced only).
 - GitHub environments, OIDC identities, variables: `docs/cicd-setup.md`.
+
+## Reading LLM content telemetry (dev)
+
+With `llmContentTelemetryEnabled = true`, in Application Insights `appi-agentwf-dev` > Logs (allow a few minutes after a call):
+
+```kusto
+traces
+| where customDimensions.CategoryName == "AgenticWorkflow.LlmContent"
+| extend Kind = tostring(customDimensions.Kind), Part = toint(customDimensions.Part),
+         TraceId = tostring(customDimensions.TraceId), SpanId = tostring(customDimensions.SpanId),
+         Content = tostring(customDimensions.Content)
+| order by timestamp desc, SpanId asc, Kind asc, Part asc
+| project timestamp, TraceId, SpanId, Deployment = tostring(customDimensions.Deployment), Kind, Part, Content
+```
+
+Each model call is one `SpanId`; join `Content` by `Part` for long values. The spans are in `dependencies`, with token counts.
+The content can hold personal data: restrict who can read this resource.

@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using AgenticWorkflow.Core.Models;
 using AgenticWorkflow.Core.Options;
 using AgenticWorkflow.Infrastructure.Azure;
+using AgenticWorkflow.Infrastructure.Telemetry;
 
 namespace AgenticWorkflow.Infrastructure.Models;
 
@@ -20,17 +21,20 @@ public sealed class ChatClientFactory : IChatClientFactory
 {
     private readonly Lazy<AIProjectClient> _projectClient;
     private readonly ConcurrentDictionary<string, IChatClient> _clients = new(StringComparer.Ordinal);
+    private readonly bool _captureLlmContent;
 
-    public ChatClientFactory(IOptions<FoundryOptions> options, IAzureCredentialProvider credentials)
-        : this(options, credentials, static (endpoint, credential) => new AIProjectClient(endpoint, credential))
+    public ChatClientFactory(IOptions<FoundryOptions> options, IAzureCredentialProvider credentials, IOptions<TelemetryOptions> telemetry)
+        : this(options, credentials, static (endpoint, credential) => new AIProjectClient(endpoint, credential), telemetry.Value.LlmContentEnabled)
     {
     }
 
     internal ChatClientFactory(
         IOptions<FoundryOptions> options,
         IAzureCredentialProvider credentials,
-        Func<Uri, TokenCredential, AIProjectClient> projectClientFactory)
+        Func<Uri, TokenCredential, AIProjectClient> projectClientFactory,
+        bool captureLlmContent = false)
     {
+        _captureLlmContent = captureLlmContent;
         _projectClient = new Lazy<AIProjectClient>(
             () =>
             {
@@ -51,11 +55,13 @@ public sealed class ChatClientFactory : IChatClientFactory
     public IChatClient Create(string deploymentName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deploymentName);
-        return _clients.GetOrAdd(
-            deploymentName,
-            name => _projectClient.Value.GetProjectOpenAIClient().GetProjectResponsesClient()
+        return _clients.GetOrAdd(deploymentName, name =>
+        {
+            var client = _projectClient.Value.GetProjectOpenAIClient().GetProjectResponsesClient()
                 // D3: store=false on every request. includeReasoningEncryptedContent=true asks the service to return
                 // encrypted reasoning items so multi-turn reasoning works statelessly (nothing is kept server-side).
-                .AsIChatClientWithStoredOutputDisabled(name, includeReasoningEncryptedContent: true));
+                .AsIChatClientWithStoredOutputDisabled(name, includeReasoningEncryptedContent: true);
+            return _captureLlmContent ? LlmContentTelemetry.Instrument(client) : client;
+        });
     }
 }
