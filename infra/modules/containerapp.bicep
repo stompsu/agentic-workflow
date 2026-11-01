@@ -24,6 +24,9 @@ param secrets array = []
 @secure()
 param inlineSecretValue string = ''
 param inlineSecretName string = 'appinsights-connection'
+@description('Optional custom domain, bound with certificateId. Empty = none.')
+param customDomain string = ''
+param customDomainCertificateId string = ''
 
 var inlineSecrets = empty(inlineSecretValue) ? [] : [
   { name: inlineSecretName, value: inlineSecretValue }
@@ -71,6 +74,9 @@ resource app 'Microsoft.App/containerApps@2025-01-01' = {
         targetPort: targetPort
         transport: 'auto'
         allowInsecure: false
+        customDomains: empty(customDomain) ? [] : [
+          { name: customDomain, bindingType: 'SniEnabled', certificateId: customDomainCertificateId }
+        ]
       }
       registries: [
         { server: registryServer, identity: identityId }

@@ -24,6 +24,10 @@ param assignAcrPull bool = true
 // ---- images (empty = public placeholder image, no probes; the pipeline then rolls real images) ----------------------
 param backendImage string = ''
 param frontendImage string = ''
+@description('Optional frontend custom domain, e.g. agenticworkflow.highpace.dev. Set both or neither: the certificate comes from az containerapp hostname bind (infra/README.md), and leaving these empty removes an existing binding on deploy.')
+param frontendCustomDomain string = ''
+@description('Name of the managed certificate in the Container Apps environment for frontendCustomDomain.')
+param frontendCustomDomainCertificateName string = ''
 param containerPort int = 8080
 
 // ---- scale ---------------------------------------------------------------------------------------------------------
@@ -410,6 +414,8 @@ module frontend 'modules/containerapp.bicep' = {
     image: frontendIsPlaceholder ? placeholderImage : frontendImage
     targetPort: frontendIsPlaceholder ? placeholderPort : containerPort
     externalIngress: true
+    customDomain: frontendCustomDomain
+    customDomainCertificateId: empty(frontendCustomDomainCertificateName) ? '' : '${containerEnv.outputs.id}/managedCertificates/${frontendCustomDomainCertificateName}'
     minReplicas: frontendMinReplicas
     maxReplicas: frontendMaxReplicas
     concurrentRequests: frontendConcurrentRequests

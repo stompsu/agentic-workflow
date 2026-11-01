@@ -187,6 +187,42 @@ GitHub OIDC identity, NOT `managedIdentityClientId` (that is the app identity).
 - Foundry project and model deployments (referenced only).
 - GitHub environments, OIDC identities, variables: `docs/cicd-setup.md`.
 
+## Frontend custom domain (dev: highpace.dev)
+
+The app is served under `/agenticworkflow/`, and `/` redirects there. Setup is one time, per domain:
+
+1. DNS for an apex domain: `A @` = the environment's `properties.staticIp`; `TXT asuid` = the frontend app's
+   `properties.customDomainVerificationId`. Remove other apex records. A CAA record, if any, must allow `digicert.com`.
+2. Add the SPA redirect URIs (`docs/auth-setup.md` section 6) before the image with the new path is deployed.
+3. Create the free managed certificate:
+   ```bash
+   az containerapp hostname add -g rg-agentwf-dev -n ca-agentwf-dev-frontend --hostname highpace.dev
+   az containerapp hostname bind -g rg-agentwf-dev -n ca-agentwf-dev-frontend --environment cae-agentwf-dev --hostname highpace.dev --validation-method HTTP
+   ```
+4. Set `frontendCustomDomain` and `frontendCustomDomainCertificateName` in the params file. Read the name with:
+   ```bash
+   az containerapp hostname list -g rg-agentwf-dev -n ca-agentwf-dev-frontend --query "[0].certificateId" -o tsv
+   ```
+   The last segment is the name. Without these two params, the next infra deploy removes the binding.
+
+## Frontend custom domain (dev: agenticworkflow.highpace.dev)
+
+Each app on `highpace.dev` has its own subdomain, with DNS at Porkbun. Setup is one time, per subdomain:
+
+1. DNS: `CNAME agenticworkflow` = the frontend's `properties.configuration.ingress.fqdn`; `TXT asuid.agenticworkflow` = its
+   `properties.customDomainVerificationId`. A CAA record on the root domain, if any, must allow `digicert.com`.
+2. Add the SPA redirect URI (`docs/auth-setup.md` section 6).
+3. Create the free managed certificate:
+   ```bash
+   az containerapp hostname add -g rg-agentwf-dev -n ca-agentwf-dev-frontend --hostname agenticworkflow.highpace.dev
+   az containerapp hostname bind -g rg-agentwf-dev -n ca-agentwf-dev-frontend --environment cae-agentwf-dev --hostname agenticworkflow.highpace.dev --validation-method CNAME
+   ```
+4. Set `frontendCustomDomain` and `frontendCustomDomainCertificateName` in the params file. Read the name with:
+   ```bash
+   az containerapp hostname list -g rg-agentwf-dev -n ca-agentwf-dev-frontend --query "[0].certificateId" -o tsv
+   ```
+   The last segment is the name. Without these two params, the next infra deploy removes the binding.
+
 ## Reading LLM content telemetry (dev)
 
 With `llmContentTelemetryEnabled = true`, in Application Insights `appi-agentwf-dev` > Logs (allow a few minutes after a call):

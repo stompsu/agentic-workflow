@@ -114,8 +114,8 @@ themselves in the app ("Delete my data", api-contract 2.8), and the page explain
 Facebook developer console, prod Meta app (optional in the nonprod app, which stays in development mode):
 1. App settings -> Basic -> "User data deletion" -> choose "Data deletion instructions URL".
    (Meta has moved this field before; if it is not under Basic, look under App settings -> Advanced.)
-2. URL: `https://<prod-frontend-fqdn>/data-deletion.html` (D10: no custom domain; use the Container App FQDN from the
-   azure-infra outputs). Save.
+2. URL: `https://<frontend-host>/data-deletion.html` (dev: `agenticworkflow.highpace.dev`; other environments: the
+   Container App FQDN from the azure-infra outputs, D10). Save.
 3. Open the URL in a private browser window and confirm it loads without sign-in before submitting for review.
 
 The page (owner frontend-react):
@@ -187,14 +187,14 @@ so the redirect URI is `<origin>/redirect.html`.
 
 | Env | Redirect URIs |
 |---|---|
-| dev | `http://localhost:5173/redirect.html`, `https://<dev-frontend-fqdn>/redirect.html` |
+| dev | `http://localhost:5173/redirect.html`, `https://agenticworkflow.highpace.dev/redirect.html`, `https://<dev-frontend-fqdn>/redirect.html` |
 | test | `https://<test-frontend-fqdn>/redirect.html` |
 | prod | `https://<prod-frontend-fqdn>/redirect.html` |
 
 `<env-frontend-fqdn>` = Container App FQDN from azure-infra outputs, e.g. `ca-agentwf-web-dev.<env-unique>.<region>.azurecontainerapps.io`.
-No custom domain for now (D10): the frontend uses the Container App FQDN and auth stays on `<sub>.ciamlogin.com`
-(Learn Q&A reports social providers may not work through External ID custom URL domains). Adding a frontend custom
-domain later means adding its `/redirect.html` URI here and updating the Facebook Site URL and section 4.1 URL; the
+Dev also has the frontend custom domain `agenticworkflow.highpace.dev` (D10; DNS and certificate: infra/README.md). Auth
+stays on `<sub>.ciamlogin.com` (Learn Q&A reports social providers may not work through External ID custom URL domains).
+Adding another frontend custom domain means adding its `/redirect.html` URI here and updating the Facebook Site URL and section 4.1 URL; the
 authority does not change.
 Post-logout redirect URI is `<origin>/` (the SPA uses `logoutRedirect`, for which the bridge is not needed).
 Localhost is allowed only in the dev registration.

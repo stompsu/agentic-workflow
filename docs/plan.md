@@ -444,7 +444,9 @@ D8. Embeddings: text-embedding-3-small at 1536 dimensions. The orchestrator runs
     on 2026-10-30). Chat stays on AIProjectClient.
 D9. Knowledge source for v1: the repo folder `knowledge/{policy,claims,health}/`; English content, analyzer
     `en.microsoft`. (data-model 2.1, 2.6)
-D10. No custom domain for now; the frontend uses the Container App FQDN and auth stays on `<sub>.ciamlogin.com`.
+D10. Revised 2026-11-01: each app gets its own subdomain of `highpace.dev`, so apps stay separate in DNS, Azure and the
+    browser. The dev frontend is `agenticworkflow.highpace.dev`; other environments use the Container App FQDN. Auth stays
+    on `<sub>.ciamlogin.com`, with no custom URL domain.
     (auth-setup section 6)
 Q5. Accepted: 180 s turn timeout under the 240 s Container Apps ingress limit. Workflow types that need longer would
     need a background job + polling pattern (a contract change). (api-contract 4.4, 7)

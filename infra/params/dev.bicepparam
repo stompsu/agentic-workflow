@@ -6,6 +6,9 @@ param acrName = 'acragentwfshared' // must be globally unique: change before the
 param createAcr = true
 // westeurope had no Search Basic capacity on 2026-10-29 (ResourcesForSkuUnavailable).
 param searchLocation = 'northeurope'
+// Bound once with az containerapp hostname bind (infra/README.md). Removing these removes the binding on the next infra deploy.
+param frontendCustomDomain = 'agenticworkflow.highpace.dev'
+param frontendCustomDomainCertificateName = 'mc-cae-agentwf-de-agenticworkflow--7648'
 
 param llmContentTelemetryEnabled = true // records prompts and user text in Application Insights (plan.md D14)
 param echoWorkflowEnabled = true // Phase 1 walking skeleton (ADR 0003: allowed in Dev)
