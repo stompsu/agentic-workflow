@@ -2,7 +2,7 @@
 # Build context: src/backend.  Image name: agentic-workflow-backend.
 #   docker build -t agentic-workflow-backend src/backend
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0 AS build
 WORKDIR /src
 
 # Restore first (layer cache): only manifests and project files.
